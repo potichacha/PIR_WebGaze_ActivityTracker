@@ -1,0 +1,10 @@
+{
+  "name": "pir-webgaze-activity-tracker",
+  "version": "1.0.0",
+  "description": "WebGaze Activity Tracker - PIR Project",
+  "scripts": {
+    "serve": "python -m http.server 8080",
+    "test": "node tests/test-calibration.js"
+  },
+  "devDependencies": {}
+}

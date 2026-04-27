@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Calibration WebGazer — PIR Activity Tracker</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: Arial, sans-serif;
+      background: #0f0f1a;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+
+    #home-screen {
+      text-align: center;
+      max-width: 600px;
+      padding: 40px;
+    }
+
+    #home-screen h1 {
+      font-size: 2rem;
+      margin-bottom: 12px;
+      color: #4ecdc4;
+    }
+
+    #home-screen p {
+      color: #aaa;
+      font-size: 1rem;
+      margin-bottom: 30px;
+      line-height: 1.6;
+    }
+
+    #status-bar {
+      background: #16213e;
+      border-radius: 12px;
+      padding: 16px 24px;
+      margin-bottom: 28px;
+      font-size: 0.9rem;
+      color: #bbb;
+      line-height: 1.8;
+    }
+
+    #status-bar span {
+      font-weight: bold;
+      color: #4ecdc4;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: 14px 36px;
+      border-radius: 10px;
+      font-size: 1.1rem;
+      cursor: pointer;
+      border: none;
+      transition: opacity 0.2s;
+      margin: 6px;
+    }
+
+    .btn:hover { opacity: 0.85; }
+
+    .btn-primary { background: #4ecdc4; color: #0f0f1a; font-weight: bold; }
+    .btn-secondary { background: #2c3e50; color: #eee; }
+    .btn-danger { background: #e74c3c; color: #fff; }
+
+    #score-display {
+      display: none;
+      background: #16213e;
+      border-radius: 12px;
+      padding: 20px 30px;
+      margin-top: 20px;
+      font-size: 0.95rem;
+    }
+
+    #score-display h3 { margin-bottom: 12px; color: #4ecdc4; }
+
+    #score-display table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    #score-display td {
+      padding: 6px 10px;
+      border-bottom: 1px solid #2c3e50;
+    }
+
+    #score-display td:last-child {
+      text-align: right;
+      font-weight: bold;
+    }
+
+    #webgazer-status {
+      font-size: 0.8rem;
+      color: #888;
+      margin-top: 20px;
+    }
+
+    #webgazer-status .dot {
+      display: inline-block;
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      margin-right: 6px;
+      background: #888;
+    }
+
+    #webgazer-status.ready .dot { background: #27ae60; }
+    #webgazer-status.loading .dot { background: #f39c12; }
+    #webgazer-status.error .dot { background: #e74c3c; }
+  </style>
+</head>
+<body>
+
+<div id="home-screen">
+  <h1>Calibration WebGazer</h1>
+  <p>
+    Ce module calibre le suivi du regard via votre webcam.<br>
+    Vous devrez cliquer sur <strong>13 points</strong> (5 clics chacun),
+    puis fixer <strong>5 points de validation</strong> sans cliquer.
+    Un score de précision sera calculé à la fin.
+  </p>
+
+  <div id="status-bar">
+    <div>Points de calibration : <span>13</span></div>
+    <div>Clics par point : <span>5</span></div>
+    <div>Seuil d'acceptation : <span>≤ 150 px</span></div>
+    <div id="stored-score-info">Dernière calibration : <span id="last-score-text">aucune</span></div>
+  </div>
+
+  <div>
+    <button class="btn btn-primary" id="btn-start">Démarrer la calibration</button>
+    <button class="btn btn-secondary" id="btn-reset">Effacer la calibration</button>
+  </div>
+
+  <!-- Score affiché après calibration sans fermer la page -->
+  <div id="score-display">
+    <h3>Dernier résultat</h3>
+    <table>
+      <tr><td>Erreur moyenne</td><td id="sd-mean">—</td></tr>
+      <tr><td>Écart-type</td><td id="sd-std">—</td></tr>
+      <tr><td>Verdict</td><td id="sd-verdict">—</td></tr>
+    </table>
+  </div>
+
+  <div id="webgazer-status" class="loading">
+    <span class="dot"></span>
+    <span id="wg-status-text">Chargement de WebGazer...</span>
+  </div>
+</div>
+
+<!-- WebGazer via CDN jsDelivr -->
+<script
+  src="https://cdn.jsdelivr.net/npm/webgazer@2.1.0/dist/webgazer.min.js"
+  crossorigin="anonymous"
+  onerror="onWebGazerLoadError()"
+></script>
+
+<script src="src/calibration/calibration.js"></script>
+
+<script>
+  // ── Gestion du statut WebGazer ──────────────────────────────────────────
+  function onWebGazerLoadError() {
+    const el = document.getElementById('webgazer-status');
+    el.className = 'error';
+    document.getElementById('wg-status-text').textContent =
+      'WebGazer non disponible (hors ligne ?). La calibration fonctionnera sans suivi réel.';
+  }
+
+  window.addEventListener('load', function () {
+    const el = document.getElementById('webgazer-status');
+    if (typeof webgazer !== 'undefined') {
+      el.className = 'ready';
+      document.getElementById('wg-status-text').textContent = 'WebGazer chargé.';
+
+      // Démarrer WebGazer silencieusement (sans afficher la vidéo par défaut)
+      webgazer.setRegression('ridge')
+              .setTracker('TFFaceMesh')
+              .begin()
+              .catch(err => {
+                el.className = 'error';
+                document.getElementById('wg-status-text').textContent =
+                  'Erreur webcam : ' + err.message;
+              });
+
+      // Masquer la vidéo WebGazer (elle s'affiche dans un coin par défaut)
+      webgazer.showVideo(false).showFaceOverlay(false).showFaceFeedbackBox(false);
+    } else {
+      onWebGazerLoadError();
+    }
+  });
+
+  // ── Affichage du score stocké au chargement ─────────────────────────────
+  window.addEventListener('load', function () {
+    const stored = Calibration.getStoredData();
+    if (stored) {
+      document.getElementById('last-score-text').textContent =
+        `${stored.meanError.toFixed(1)} px (le ${new Date(stored.timestamp).toLocaleString()})`;
+    }
+  });
+
+  // ── Bouton Démarrer ─────────────────────────────────────────────────────
+  document.getElementById('btn-start').addEventListener('click', function () {
+    Calibration.start(function onCalibrationComplete(score) {
+      // Afficher le score sur la page d'accueil après fermeture de l'overlay
+      const sdDiv = document.getElementById('score-display');
+      sdDiv.style.display = 'block';
+      document.getElementById('sd-mean').textContent = score.meanError.toFixed(1) + ' px';
+      document.getElementById('sd-std').textContent  = score.stdError.toFixed(1) + ' px';
+      document.getElementById('sd-verdict').textContent =
+        score.meanError <= Calibration.CONFIG.RECALIBRATION_THRESHOLD
+          ? '✓ Réussie' : '✗ Insuffisante';
+
+      document.getElementById('last-score-text').textContent =
+        `${score.meanError.toFixed(1)} px`;
+    });
+  });
+
+  // ── Bouton Effacer ──────────────────────────────────────────────────────
+  document.getElementById('btn-reset').addEventListener('click', function () {
+    Calibration.reset();
+    document.getElementById('last-score-text').textContent = 'aucune';
+    document.getElementById('score-display').style.display = 'none';
+  });
+</script>
+</body>
+</html>
