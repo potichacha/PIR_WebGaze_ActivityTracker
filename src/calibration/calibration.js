@@ -9,7 +9,7 @@
  *   - Miroir webcam + guidance de positionnement avant calibration
  *   - Animation pulse + délai minimum avant premier clic
  *   - Élimination des outliers (2σ) pendant la validation
- *   - Score de précision par quadrant (9 zones)
+ *   - Score de précision par quadrant (4 zones)
  *   - Calibration adaptative : points supplémentaires sur zones faibles
  *   - Détection luminosité (luminance webcam)
  *   - Recalibration partielle (seulement les quadrants défaillants)
@@ -17,9 +17,15 @@
  *   - Dérive temporelle : surveillance via clics implicites
  *   - Filtre médian sur les prédictions de validation
  *
+ * Améliorations niveau code (post-WebGazer) :
+ *   [A] trailTime = 0  — désactive le mousemove comme données d'entraînement WebGazer
+ *   [B] ridgeParameter = 1e-2  — régularisation plus forte (évite overfit sur ~125 samples)
+ *   [C] Augmentation de données synthétiques  — interpole des points entre voisins de grille
+ *   [D] Correction bilinéaire continue  — champ de correction 2D sur les 5 pts de validation
+ *   [E] LOWESS post-processing  — régression locale pondérée par distance au carré inversée
+ *
  * API publique :
- *   Calibration.start(onComplete)         — mode clics (25 points)
- *   Calibration.startAnimated(onComplete)  — mode balle animée (smooth pursuit)
+ *   Calibration.start(onComplete)
  *   Calibration.getScore()
  *   Calibration.getStoredData()
  *   Calibration.reset()
@@ -54,6 +60,16 @@
     ANIMATED_COLLECT_RATE_MS:  40,    // intervalle d'échantillonnage pendant l'arrêt
     ANIMATED_BALL_RADIUS:      18,    // rayon de la balle en px
     ANIMATED_TRAIL_LENGTH:     12,    // nombre de positions conservées pour le sillage
+    // [B] Régularisation ridge renforcée
+    RIDGE_PARAMETER:           1e-2,  // défaut WebGazer : 1e-5 — on force la généralisation
+    // [C] Augmentation de données synthétiques
+    SYNTH_INTERPOLATION_STEPS: 2,     // points intermédiaires entre chaque paire de voisins
+    SYNTH_ENABLED:             true,
+    // [D] Correction bilinéaire
+    BILINEAR_ENABLED:          true,
+    // [E] LOWESS post-processing
+    LOWESS_ENABLED:            true,
+    LOWESS_BANDWIDTH:          0.45,  // fraction de points utilisés pour chaque prédiction locale
   };
 
   // ─── Grille de 25 points en % du viewport ──────────────────────────────────
@@ -403,6 +419,16 @@
     const dt  = lastPredTime ? now - lastPredTime : 33;
     lastPredTime = now;
     const filtered = kalman.update(raw.x, raw.y, dt);
+
+    // [D] Correction IDW si des nœuds de validation existent
+    if (idwNodes.length > 0) {
+      // [E] LOWESS affine ensuite la correction IDW
+      const idw     = applyIDWCorrection(filtered.x, filtered.y);
+      const lowess  = applyLOWESS(idw.x, idw.y);
+      return lowess;
+    }
+
+    // Fallback : biais global + quadrant (avant la première validation)
     const q = getQuadrant(filtered.x, filtered.y);
     return {
       x: filtered.x - biasX - quadrantBias[q].x,
@@ -665,6 +691,8 @@
 
       if (index >= shuffled.length) {
         stopGazeDot();
+        // [C] Injecter des points synthétiques entre voisins de grille
+        injectSyntheticCalibrationData(CALIBRATION_GRID);
         if (typeof onDone === 'function') onDone();
         else startValidationPhase(null, null);
         return;
@@ -966,6 +994,8 @@
         // Fin — nettoyer et passer à la validation
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         stopGazeDot();
+        // [C] Injecter des points synthétiques entre voisins de grille
+        injectSyntheticCalibrationData(CALIBRATION_GRID);
         if (typeof onDone === 'function') onDone();
         return;
       }
@@ -1143,13 +1173,13 @@
   function computeBiasCorrection(predsByPoint, grid) {
     if (!predsByPoint.length) return;
 
-    // Biais global
+    // Biais global (conservé comme fallback pré-validation)
     const errorsX = predsByPoint.map(p => p.predX - p.targetX);
     const errorsY = predsByPoint.map(p => p.predY - p.targetY);
     biasX = mean(errorsX);
     biasY = mean(errorsY);
 
-    // Biais par quadrant
+    // Biais par quadrant (fallback)
     const quads = { topLeft: [], topRight: [], bottomLeft: [], bottomRight: [] };
     predsByPoint.forEach(p => {
       const q = getQuadrant(p.targetX, p.targetY);
@@ -1162,6 +1192,9 @@
         quadrantBias[q].y = mean(pts.map(p => p.ey)) - biasY;
       }
     });
+
+    // [D] Construire le champ de correction IDW à partir des points de validation
+    computeIDWField(predsByPoint);
   }
 
   // ─── Score par quadrant ────────────────────────────────────────────────────
@@ -1212,10 +1245,120 @@
 
   function selectBestRegression(onSelected) {
     if (typeof webgazer === 'undefined') { onSelected('ridge'); return; }
-    // WebGazer ne permet pas de tester les deux en parallèle sans recalibration
-    // On utilise ridge par défaut (meilleure généralisation documentée)
     try { webgazer.setRegression('ridge'); } catch (_) {}
+    // [A] Désactiver le trail mousemove + [B] renforcer la régularisation L2
+    try {
+      const regs = webgazer.getRegression ? webgazer.getRegression() : null;
+      if (regs && regs[0]) {
+        regs[0].trailTime      = 0;                     // [A] mousemove trail → 0
+        regs[0].ridgeParameter = CONFIG.RIDGE_PARAMETER; // [B] 1e-2 au lieu de 1e-5
+      }
+    } catch (_) {}
     onSelected('ridge');
+  }
+
+  // ─── [C] Augmentation de données synthétiques ──────────────────────────────
+  // Interpole des points intermédiaires entre voisins de grille pour densifier
+  // le jeu d'entraînement sans demander d'effort supplémentaire à l'utilisateur.
+
+  function injectSyntheticCalibrationData(grid) {
+    if (!CONFIG.SYNTH_ENABLED) return;
+    if (typeof webgazer === 'undefined') return;
+    const steps = CONFIG.SYNTH_INTERPOLATION_STEPS;
+    // Voisins horizontaux et verticaux (grille 5×5)
+    const cols = 5, rows = 5;
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        const idx = r * cols + c;
+        const pt  = grid[idx];
+        const x0  = pxFromPct(pt.xPct, window.innerWidth);
+        const y0  = pxFromPct(pt.yPct, window.innerHeight);
+
+        // Voisin à droite
+        if (c + 1 < cols) {
+          const nb  = grid[r * cols + c + 1];
+          const x1  = pxFromPct(nb.xPct, window.innerWidth);
+          const y1  = pxFromPct(nb.yPct, window.innerHeight);
+          for (let s = 1; s <= steps; s++) {
+            const t = s / (steps + 1);
+            try { webgazer.recordScreenPosition(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, 'click'); } catch (_) {}
+          }
+        }
+        // Voisin en dessous
+        if (r + 1 < rows) {
+          const nb  = grid[(r + 1) * cols + c];
+          const x1  = pxFromPct(nb.xPct, window.innerWidth);
+          const y1  = pxFromPct(nb.yPct, window.innerHeight);
+          for (let s = 1; s <= steps; s++) {
+            const t = s / (steps + 1);
+            try { webgazer.recordScreenPosition(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, 'click'); } catch (_) {}
+          }
+        }
+      }
+    }
+  }
+
+  // ─── [D] Champ de correction IDW (Inverse Distance Weighting) ─────────────
+  // Remplace le système quadrant : correction continue 2D à partir des 5 pts de validation.
+
+  let idwNodes = []; // [{targetX, targetY, errX, errY}, ...]
+
+  function computeIDWField(predsByPoint) {
+    idwNodes = predsByPoint.map(p => ({
+      targetX: p.targetX,
+      targetY: p.targetY,
+      errX:    p.predX - p.targetX,  // correction à soustraire
+      errY:    p.predY - p.targetY,
+    }));
+  }
+
+  function applyIDWCorrection(x, y) {
+    if (!CONFIG.BILINEAR_ENABLED || !idwNodes.length) return { x, y };
+    const EPS = 1e-6;
+    let sumW = 0, sumEX = 0, sumEY = 0;
+    for (const nd of idwNodes) {
+      const d2 = (x - nd.targetX) ** 2 + (y - nd.targetY) ** 2;
+      const w  = 1 / (d2 + EPS);
+      sumW  += w;
+      sumEX += w * nd.errX;
+      sumEY += w * nd.errY;
+    }
+    return {
+      x: x - sumEX / sumW,
+      y: y - sumEY / sumW,
+    };
+  }
+
+  // ─── [E] LOWESS post-correction ────────────────────────────────────────────
+  // Régression locale pondérée par distance aux points de validation.
+  // Affine la correction IDW avec un lissage tricubique.
+
+  function applyLOWESS(x, y) {
+    if (!CONFIG.LOWESS_ENABLED || !idwNodes.length) return { x, y };
+    const EPS = 1e-6;
+
+    // Distance de chaque nœud de validation au point courant
+    const dists = idwNodes.map(nd =>
+      Math.sqrt((x - nd.targetX) ** 2 + (y - nd.targetY) ** 2)
+    );
+    const maxDist = Math.max(...dists, EPS);
+
+    // Noyau tricubique : w = (1 - (d/h)^3)^3 pour d < h
+    const h = maxDist * (1 + CONFIG.LOWESS_BANDWIDTH); // bandwidth adaptatif
+    let sumW = 0, sumEX = 0, sumEY = 0;
+    idwNodes.forEach((nd, i) => {
+      const u = dists[i] / h;
+      if (u >= 1) return;
+      const w = Math.pow(1 - Math.pow(u, 3), 3);
+      sumW  += w;
+      sumEX += w * nd.errX;
+      sumEY += w * nd.errY;
+    });
+    if (sumW < EPS) return { x, y };
+    return {
+      x: x - sumEX / sumW,
+      y: y - sumEY / sumW,
+    };
   }
 
   // ─── Affichage du score final ──────────────────────────────────────────────
@@ -1372,6 +1515,7 @@
         biasX,
         biasY,
         quadrantBias:   JSON.parse(JSON.stringify(quadrantBias)),
+        idwNodes:       JSON.parse(JSON.stringify(idwNodes)),
       }));
     } catch (e) {
       console.warn('[Calibration] localStorage non disponible :', e);
@@ -1390,6 +1534,7 @@
           if (quadrantBias[q]) quadrantBias[q] = d.quadrantBias[q];
         });
       }
+      if (Array.isArray(d.idwNodes)) idwNodes = d.idwNodes;
     } catch (_) {}
   }
 
@@ -1463,12 +1608,17 @@
       lastScore = null;
       biasX = 0; biasY = 0;
       Object.keys(quadrantBias).forEach(q => { quadrantBias[q] = { x: 0, y: 0 }; });
+      idwNodes = [];
       implicitClicks = [];
       kalman.reset();
     },
 
     // Appliquer la correction de biais à une prédiction externe
     applyBiasCorrection(x, y) {
+      if (idwNodes.length > 0) {
+        const idw = applyIDWCorrection(x, y);
+        return applyLOWESS(idw.x, idw.y);
+      }
       const q = getQuadrant(x, y);
       return {
         x: x - biasX - quadrantBias[q].x,
@@ -1484,9 +1634,9 @@
     CONFIG,
     CALIBRATION_GRID,
     VALIDATION_GRID,
-    _helpers: { distance, mean, stdDev, median, pxFromPct, removeOutliers, medianFilterPoints, getQuadrant, detectFixations, checkStability },
+    _helpers: { distance, mean, stdDev, median, pxFromPct, removeOutliers, medianFilterPoints, getQuadrant, detectFixations, checkStability, applyIDWCorrection, applyLOWESS, computeIDWField, injectSyntheticCalibrationData },
     _kalman: KalmanFilter,
-    _internal: { startAnimatedCalibrationPhase },
+    _internal: { startAnimatedCalibrationPhase, get idwNodes() { return idwNodes; } },
   };
 
   global.Calibration = Calibration;
