@@ -1428,6 +1428,27 @@
       });
     },
 
+    startAnimated(onComplete) {
+      onCompleteCallback = onComplete || null;
+      kalman.reset();
+      implicitClicks = [];
+
+      if (typeof webgazer !== 'undefined') {
+        try { webgazer.saveDataAcrossSessions(true); } catch (_) {}
+        try { webgazer.applyKalmanFilter(true); }      catch (_) {}
+      }
+
+      loadBiasFromStorage();
+      selectBestRegression(() => {
+        startGuidancePhase(() => {
+          startAnimatedCalibrationPhase(() => {
+            createOverlay();
+            startValidationPhase(null, (score) => showScore(score));
+          });
+        });
+      });
+    },
+
     getScore() { return lastScore; },
 
     getStoredData() {
