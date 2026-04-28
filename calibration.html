@@ -12,14 +12,15 @@
   <h1>Calibration WebGazer</h1>
   <p>
     Ce module calibre le suivi du regard via votre webcam.<br>
-    Vous devrez cliquer sur <strong>25 points</strong> (5 clics chacun),
-    puis fixer <strong>5 points de validation</strong> sans cliquer.
-    Un score de précision global et par quadrant sera calculé.
+    La calibration se déroule en deux phases enchaînées :
+    d'abord <strong>25 points cliquables</strong> (5 clics chacun),
+    puis une <strong>balle animée</strong> à suivre du regard.
+    Enfin, <strong>5 points de validation</strong> mesurent la précision.
   </p>
 
   <div id="status-bar">
-    <div>Points de calibration : <span>25</span></div>
-    <div>Clics par point : <span>5</span></div>
+    <div>Phase 1 — Points cliquables : <span>25 points × 5 clics</span></div>
+    <div>Phase 2 — Balle animée : <span>25 points (smooth pursuit)</span></div>
     <div>Seuil d'acceptation : <span>≤ 150 px</span></div>
     <div>Dernière calibration : <span id="last-score-text">aucune</span></div>
     <div>Biais corrigé (X / Y) : <span id="bias-display">—</span></div>
@@ -49,16 +50,10 @@
   </details>
 
   <div style="margin-bottom:10px;">
-    <div style="font-size:0.78rem;color:#666;margin-bottom:8px;letter-spacing:0.05em;text-transform:uppercase;">Choisir un mode</div>
-    <button class="btn btn-primary" id="btn-start">🎯 25 points cliquables</button>
-    <button class="btn btn-animated" id="btn-start-animated">🔵 Balle animée</button>
+    <button class="btn btn-primary" id="btn-start">🎯 Démarrer la calibration</button>
   </div>
   <div>
     <button class="btn btn-secondary" id="btn-reset">Effacer la calibration</button>
-  </div>
-  <div id="mode-hint" style="font-size:0.8rem;color:#666;margin-top:10px;line-height:1.7;">
-    <strong style="color:#4ecdc4;">Points cliquables</strong> — plus précis, vous contrôlez le rythme.<br>
-    <strong style="color:#a29bfe;">Balle animée</strong> — plus naturel, suivez la balle du regard sans cliquer.
   </div>
 
   <div id="score-display">
@@ -141,14 +136,6 @@
   // ── Bouton Démarrer ───────────────────────────────────────────────────────
   document.getElementById('btn-start').addEventListener('click', function () {
     Calibration.start(function onCalibrationComplete(score) {
-      renderScore(score);
-      startDriftMonitor();
-    });
-  });
-
-  // ── Bouton Balle animée ───────────────────────────────────────────────────
-  document.getElementById('btn-start-animated').addEventListener('click', function () {
-    Calibration.startAnimated(function onCalibrationComplete(score) {
       renderScore(score);
       startDriftMonitor();
     });
