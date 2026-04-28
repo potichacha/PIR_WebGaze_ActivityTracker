@@ -12,31 +12,72 @@
   <h1>Calibration WebGazer</h1>
   <p>
     Ce module calibre le suivi du regard via votre webcam.<br>
-    Vous devrez cliquer sur <strong>13 points</strong> (5 clics chacun),
+    Vous devrez cliquer sur <strong>25 points</strong> (5 clics chacun),
     puis fixer <strong>5 points de validation</strong> sans cliquer.
-    Un score de précision sera calculé à la fin.
+    Un score de précision global et par quadrant sera calculé.
   </p>
 
   <div id="status-bar">
-    <div>Points de calibration : <span>13</span></div>
+    <div>Points de calibration : <span>25</span></div>
     <div>Clics par point : <span>5</span></div>
     <div>Seuil d'acceptation : <span>≤ 150 px</span></div>
-    <div id="stored-score-info">Dernière calibration : <span id="last-score-text">aucune</span></div>
+    <div>Dernière calibration : <span id="last-score-text">aucune</span></div>
+    <div>Biais corrigé (X / Y) : <span id="bias-display">—</span></div>
   </div>
 
+  <details id="improvements-panel">
+    <summary>Améliorations actives vs version de base</summary>
+    <ul>
+      <li>✓ 25 points (grille 5×5, bords extrêmes couverts)</li>
+      <li>✓ Ordre des points randomisé à chaque session</li>
+      <li>✓ Filtre de Kalman 4 états (x, y, vx, vy)</li>
+      <li>✓ Filtre Kalman natif WebGazer (<code>applyKalmanFilter(true)</code>)</li>
+      <li>✓ Correction de biais X/Y global + par quadrant</li>
+      <li>✓ Persistance inter-sessions (<code>saveDataAcrossSessions(true)</code>)</li>
+      <li>✓ Miroir webcam + analyse de luminosité avant calibration</li>
+      <li>✓ Animation pulse + délai minimum avant 1er clic</li>
+      <li>✓ Anneau SVG de progression par point</li>
+      <li>✓ Élimination des outliers (2σ) sur les prédictions de validation</li>
+      <li>✓ Filtre médian sur les prédictions de validation</li>
+      <li>✓ Score de précision par quadrant (4 zones)</li>
+      <li>✓ Calibration adaptative sur zones faibles</li>
+      <li>✓ Régression Ridge (<code>setRegression('ridge')</code>)</li>
+      <li>✓ Surveillance de dérive temporelle via clics implicites</li>
+      <li>✓ Recalibration partielle (zones faibles uniquement)</li>
+      <li>✓ Dot rouge temps réel suivant le regard pendant la calibration</li>
+    </ul>
+  </details>
+
+  <div style="margin-bottom:10px;">
+    <div style="font-size:0.78rem;color:#666;margin-bottom:8px;letter-spacing:0.05em;text-transform:uppercase;">Choisir un mode</div>
+    <button class="btn btn-primary" id="btn-start">🎯 25 points cliquables</button>
+    <button class="btn btn-animated" id="btn-start-animated">🔵 Balle animée</button>
+  </div>
   <div>
-    <button class="btn btn-primary" id="btn-start">Démarrer la calibration</button>
     <button class="btn btn-secondary" id="btn-reset">Effacer la calibration</button>
   </div>
+  <div id="mode-hint" style="font-size:0.8rem;color:#666;margin-top:10px;line-height:1.7;">
+    <strong style="color:#4ecdc4;">Points cliquables</strong> — plus précis, vous contrôlez le rythme.<br>
+    <strong style="color:#a29bfe;">Balle animée</strong> — plus naturel, suivez la balle du regard sans cliquer.
+  </div>
 
-  <!-- Score affiché après calibration sans fermer la page -->
   <div id="score-display">
     <h3>Dernier résultat</h3>
     <table>
       <tr><td>Erreur moyenne</td><td id="sd-mean">—</td></tr>
-      <tr><td>Écart-type</td><td id="sd-std">—</td></tr>
-      <tr><td>Verdict</td><td id="sd-verdict">—</td></tr>
+      <tr><td>Écart-type</td>    <td id="sd-std">—</td></tr>
+      <tr><td>Verdict</td>       <td id="sd-verdict">—</td></tr>
     </table>
+    <div style="margin-top:12px;font-size:0.82rem;color:#4ecdc4;">Précision par quadrant</div>
+    <div class="quadrant-grid" id="quadrant-grid"></div>
+  </div>
+
+  <div id="drift-indicator">
+    ⚠️ Dérive détectée — <span id="drift-value">—</span> px en moyenne sur les derniers clics.
+    <button class="btn btn-danger" id="btn-drift-recal"
+      style="padding:6px 14px;font-size:0.8rem;margin-left:10px;">
+      Recalibrer
+    </button>
   </div>
 
   <div id="webgazer-status" class="loading">
@@ -45,7 +86,6 @@
   </div>
 </div>
 
-<!-- WebGazer via CDN jsDelivr -->
 <script
   src="https://cdn.jsdelivr.net/npm/webgazer@2.1.0/dist/webgazer.min.js"
   crossorigin="anonymous"
@@ -55,7 +95,7 @@
 <script src="src/calibration/calibration.js"></script>
 
 <script>
-  // ── Gestion du statut WebGazer ──────────────────────────────────────────
+  // ── Gestion du statut WebGazer ────────────────────────────────────────────
   function onWebGazerLoadError() {
     const el = document.getElementById('webgazer-status');
     el.className = 'error';
@@ -67,57 +107,125 @@
     const el = document.getElementById('webgazer-status');
     if (typeof webgazer !== 'undefined') {
       el.className = 'ready';
-      document.getElementById('wg-status-text').textContent = 'WebGazer chargé.';
+      document.getElementById('wg-status-text').textContent = 'WebGazer chargé et prêt.';
 
-      // Démarrer WebGazer silencieusement (sans afficher la vidéo par défaut)
-      webgazer.setRegression('ridge')
-              .setTracker('TFFaceMesh')
-              .begin()
-              .catch(err => {
-                el.className = 'error';
-                document.getElementById('wg-status-text').textContent =
-                  'Erreur webcam : ' + err.message;
-              });
+      webgazer
+        .setRegression('ridge')
+        .setTracker('TFFaceMesh')
+        .begin()
+        .catch(err => {
+          el.className = 'error';
+          document.getElementById('wg-status-text').textContent =
+            'Erreur webcam : ' + err.message;
+        });
 
-      // Masquer la vidéo WebGazer (elle s'affiche dans un coin par défaut)
       webgazer.showVideo(false).showFaceOverlay(false).showFaceFeedbackBox(false);
     } else {
       onWebGazerLoadError();
     }
   });
 
-  // ── Affichage du score stocké au chargement ─────────────────────────────
+  // ── Affichage du score stocké au chargement ───────────────────────────────
   window.addEventListener('load', function () {
     const stored = Calibration.getStoredData();
     if (stored) {
       document.getElementById('last-score-text').textContent =
-        `${stored.meanError.toFixed(1)} px (le ${new Date(stored.timestamp).toLocaleString()})`;
+        `${stored.meanError.toFixed(1)} px — ${new Date(stored.timestamp).toLocaleString()}`;
+      if (typeof stored.biasX === 'number') {
+        document.getElementById('bias-display').textContent =
+          `${stored.biasX.toFixed(1)} px / ${stored.biasY.toFixed(1)} px`;
+      }
     }
   });
 
-  // ── Bouton Démarrer ─────────────────────────────────────────────────────
+  // ── Bouton Démarrer ───────────────────────────────────────────────────────
   document.getElementById('btn-start').addEventListener('click', function () {
     Calibration.start(function onCalibrationComplete(score) {
-      // Afficher le score sur la page d'accueil après fermeture de l'overlay
-      const sdDiv = document.getElementById('score-display');
-      sdDiv.style.display = 'block';
-      document.getElementById('sd-mean').textContent = score.meanError.toFixed(1) + ' px';
-      document.getElementById('sd-std').textContent  = score.stdError.toFixed(1) + ' px';
-      document.getElementById('sd-verdict').textContent =
-        score.meanError <= Calibration.CONFIG.RECALIBRATION_THRESHOLD
-          ? '✓ Réussie' : '✗ Insuffisante';
-
-      document.getElementById('last-score-text').textContent =
-        `${score.meanError.toFixed(1)} px`;
+      renderScore(score);
+      startDriftMonitor();
     });
   });
 
-  // ── Bouton Effacer ──────────────────────────────────────────────────────
+  // ── Bouton Balle animée ───────────────────────────────────────────────────
+  document.getElementById('btn-start-animated').addEventListener('click', function () {
+    Calibration.startAnimated(function onCalibrationComplete(score) {
+      renderScore(score);
+      startDriftMonitor();
+    });
+  });
+
+  // ── Bouton Effacer ────────────────────────────────────────────────────────
   document.getElementById('btn-reset').addEventListener('click', function () {
     Calibration.reset();
     document.getElementById('last-score-text').textContent = 'aucune';
+    document.getElementById('bias-display').textContent = '—';
     document.getElementById('score-display').style.display = 'none';
+    document.getElementById('drift-indicator').style.display = 'none';
   });
+
+  // ── Bouton recalibration depuis alerte dérive ─────────────────────────────
+  document.getElementById('btn-drift-recal').addEventListener('click', function () {
+    document.getElementById('drift-indicator').style.display = 'none';
+    document.getElementById('btn-start').click();
+  });
+
+  // ── Rendu du score ────────────────────────────────────────────────────────
+  function renderScore(score) {
+    const sdDiv = document.getElementById('score-display');
+    sdDiv.style.display = 'block';
+    document.getElementById('sd-mean').textContent    = score.meanError.toFixed(1) + ' px';
+    document.getElementById('sd-std').textContent     = score.stdError.toFixed(1)  + ' px';
+    const ok = score.meanError <= Calibration.CONFIG.RECALIBRATION_THRESHOLD;
+    document.getElementById('sd-verdict').textContent = ok ? '✓ Réussie' : '✗ Insuffisante';
+    document.getElementById('sd-verdict').style.color = ok ? '#27ae60' : '#e74c3c';
+
+    document.getElementById('last-score-text').textContent =
+      `${score.meanError.toFixed(1)} px`;
+
+    const stored = Calibration.getStoredData();
+    if (stored && typeof stored.biasX === 'number') {
+      document.getElementById('bias-display').textContent =
+        `${stored.biasX.toFixed(1)} px / ${stored.biasY.toFixed(1)} px`;
+    }
+
+    // Grille quadrant
+    const grid = document.getElementById('quadrant-grid');
+    grid.innerHTML = '';
+    const qLabels = {
+      topLeft: 'Haut-gauche', topRight: 'Haut-droite',
+      bottomLeft: 'Bas-gauche', bottomRight: 'Bas-droite',
+    };
+    if (score.quadrantErrors) {
+      Object.entries(score.quadrantErrors).forEach(([q, err]) => {
+        const cell = document.createElement('div');
+        cell.className = 'quadrant-cell';
+        let cls = 'good', txt = '—';
+        if (err !== null) {
+          txt = err.toFixed(1) + ' px';
+          cls = err > Calibration.CONFIG.ADAPTIVE_THRESHOLD ? 'bad'
+              : err > Calibration.CONFIG.RECALIBRATION_THRESHOLD * 0.8 ? 'warn' : 'good';
+        }
+        cell.innerHTML = `<span class="label">${qLabels[q]}</span><span class="val ${cls}">${txt}</span>`;
+        grid.appendChild(cell);
+      });
+    }
+  }
+
+  // ── Surveillance dérive (toutes les 15s) ──────────────────────────────────
+  let driftInterval = null;
+  function startDriftMonitor() {
+    if (driftInterval) clearInterval(driftInterval);
+    driftInterval = setInterval(function () {
+      const drift = Calibration.getDriftScore();
+      const indicator = document.getElementById('drift-indicator');
+      if (drift && drift.meanError > Calibration.CONFIG.DRIFT_THRESHOLD) {
+        document.getElementById('drift-value').textContent = drift.meanError.toFixed(1);
+        indicator.style.display = 'block';
+      } else {
+        indicator.style.display = 'none';
+      }
+    }, 15000);
+  }
 </script>
 </body>
 </html>
