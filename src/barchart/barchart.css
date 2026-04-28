@@ -1,0 +1,53 @@
+.barchart-tooltip {
+  position: fixed;
+  background: rgba(28, 28, 28, 0.9);
+  color: #fff;
+  padding: 8px 12px;
+  border-radius: 5px;
+  font-size: 13px;
+  font-family: Arial, sans-serif;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 9999;
+  line-height: 1.65;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+}
+
+.barchart-title {
+  font-size: 16px;
+  font-weight: bold;
+  fill: #1a1a1a;
+  font-family: Arial, sans-serif;
+}
+
+.barchart-axis-label {
+  font-size: 12px;
+  fill: #666;
+  font-family: Arial, sans-serif;
+}
+
+.barchart-bar-value {
+  font-size: 10px;
+  fill: #555;
+  font-family: Arial, sans-serif;
+  pointer-events: none;
+}
+
+.barchart-grid line {
+  stroke: #eaeaea;
+  stroke-dasharray: 4, 3;
+}
+
+.barchart-grid path {
+  stroke-width: 0;
+}
+
+.barchart-x-axis path,
+.barchart-y-axis path {
+  stroke: #bbb;
+}
+
+.barchart-x-axis line,
+.barchart-y-axis line {
+  stroke: #bbb;
+}
