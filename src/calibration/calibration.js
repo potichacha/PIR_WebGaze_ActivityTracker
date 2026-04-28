@@ -45,6 +45,7 @@
   let clickCount = 0;
   let lastScore = null;
   let onCompleteCallback = null;
+  let currentCalibrationPoint = null;
 
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -66,6 +67,137 @@
     const m = mean(arr);
     const variance = arr.reduce((s, v) => s + (v - m) ** 2, 0) / arr.length;
     return Math.sqrt(variance);
+  }
+
+  function detectFixations(gazeData, dispersionThreshold, minDuration) {
+    if (!Array.isArray(gazeData) || gazeData.length === 0) return [];
+
+    const threshold = Number(dispersionThreshold);
+    const durationMin = Number(minDuration);
+    if (!Number.isFinite(threshold) || threshold < 0) return [];
+    if (!Number.isFinite(durationMin) || durationMin < 0) return [];
+
+    const points = gazeData.filter(
+      p => p && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.timestamp)
+    );
+    if (points.length === 0) return [];
+
+    const fixations = [];
+    let i = 0;
+    let j = -1;
+    let sumX = 0;
+    let sumY = 0;
+
+    const minXDeque = [];
+    const maxXDeque = [];
+    const minYDeque = [];
+    const maxYDeque = [];
+
+    function pushIndex(idx) {
+      const p = points[idx];
+
+      while (minXDeque.length && points[minXDeque[minXDeque.length - 1]].x >= p.x) minXDeque.pop();
+      minXDeque.push(idx);
+
+      while (maxXDeque.length && points[maxXDeque[maxXDeque.length - 1]].x <= p.x) maxXDeque.pop();
+      maxXDeque.push(idx);
+
+      while (minYDeque.length && points[minYDeque[minYDeque.length - 1]].y >= p.y) minYDeque.pop();
+      minYDeque.push(idx);
+
+      while (maxYDeque.length && points[maxYDeque[maxYDeque.length - 1]].y <= p.y) maxYDeque.pop();
+      maxYDeque.push(idx);
+
+      sumX += p.x;
+      sumY += p.y;
+      j = idx;
+    }
+
+    function dropLeftIndex(idx) {
+      const p = points[idx];
+      if (minXDeque.length && minXDeque[0] === idx) minXDeque.shift();
+      if (maxXDeque.length && maxXDeque[0] === idx) maxXDeque.shift();
+      if (minYDeque.length && minYDeque[0] === idx) minYDeque.shift();
+      if (maxYDeque.length && maxYDeque[0] === idx) maxYDeque.shift();
+      sumX -= p.x;
+      sumY -= p.y;
+    }
+
+    function resetWindow(nextStart) {
+      minXDeque.length = 0;
+      maxXDeque.length = 0;
+      minYDeque.length = 0;
+      maxYDeque.length = 0;
+      sumX = 0;
+      sumY = 0;
+      j = nextStart - 1;
+    }
+
+    function currentDispersion() {
+      if (!minXDeque.length || !maxXDeque.length || !minYDeque.length || !maxYDeque.length) return Infinity;
+      const minX = points[minXDeque[0]].x;
+      const maxX = points[maxXDeque[0]].x;
+      const minY = points[minYDeque[0]].y;
+      const maxY = points[maxYDeque[0]].y;
+      return (maxX - minX) + (maxY - minY);
+    }
+
+    while (i < points.length) {
+      if (j < i) {
+        resetWindow(i);
+      }
+
+      while (j + 1 < points.length) {
+        const currentDuration = j >= i ? points[j].timestamp - points[i].timestamp : 0;
+        if (currentDuration >= durationMin) break;
+        pushIndex(j + 1);
+      }
+
+      if (j < i || points[j].timestamp - points[i].timestamp < durationMin) {
+        break;
+      }
+
+      let dispersion = currentDispersion();
+
+      if (dispersion <= threshold) {
+        while (j + 1 < points.length) {
+          const nextPoint = points[j + 1];
+          const minX = Math.min(points[minXDeque[0]].x, nextPoint.x);
+          const maxX = Math.max(points[maxXDeque[0]].x, nextPoint.x);
+          const minY = Math.min(points[minYDeque[0]].y, nextPoint.y);
+          const maxY = Math.max(points[maxYDeque[0]].y, nextPoint.y);
+          const nextDispersion = (maxX - minX) + (maxY - minY);
+          if (nextDispersion > threshold) break;
+          pushIndex(j + 1);
+          dispersion = nextDispersion;
+        }
+
+        const pointsCount = j - i + 1;
+        const startTime = points[i].timestamp;
+        const endTime = points[j].timestamp;
+        const duration = endTime - startTime;
+
+        if (duration >= durationMin && pointsCount > 0 && Number.isFinite(dispersion)) {
+          fixations.push({
+            x_center: sumX / pointsCount,
+            y_center: sumY / pointsCount,
+            start_time: startTime,
+            end_time: endTime,
+            duration,
+            points_count: pointsCount,
+          });
+        }
+
+        i = j + 1;
+        resetWindow(i);
+        continue;
+      }
+
+      dropLeftIndex(i);
+      i++;
+    }
+
+    return fixations;
   }
 
   // ─── Création de l'overlay plein écran ────────────────────────────────────
@@ -94,6 +226,139 @@
     overlay = null;
   }
 
+  function createGazeCoordPanel() {
+    const coords = document.createElement('div');
+    coords.id = 'cal-point-coords';
+    coords.style.cssText = `
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      z-index: 10002;
+      min-width: 190px;
+      padding: 12px 16px;
+      border-radius: 10px;
+      background: rgba(15, 15, 26, 0.92);
+      border: 1px solid rgba(78, 205, 196, 0.45);
+      color: #eee;
+      font-size: 0.95rem;
+      line-height: 1.4;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+      pointer-events: none;
+    `;
+    coords.innerHTML = `
+      <div style="font-weight:bold;color:#4ecdc4;margin-bottom:4px;">Curseur WebGazer</div>
+      <div id="cal-point-coords-text">—</div>
+    `;
+    document.body.appendChild(coords);
+  }
+
+  function updateCalibrationPointCoords(x, y) {
+    currentCalibrationPoint = { x, y };
+  }
+
+  function updateGazeCursorCoords(x, y) {
+    const text = document.getElementById('cal-point-coords-text');
+    if (!text) return;
+    text.textContent = `x : ${Math.round(x)}px · y : ${Math.round(y)}px`;
+  }
+
+  function checkStability(stabilityQueue, point, maxWidth = 100, maxHeight = 80, requiredCount = 5) {
+    if (!Array.isArray(stabilityQueue)) return false;
+    if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
+      stabilityQueue.length = 0;
+      return false;
+    }
+
+    stabilityQueue.push(point);
+
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+
+    for (const item of stabilityQueue) {
+      if (item.x < minX) minX = item.x;
+      if (item.x > maxX) maxX = item.x;
+      if (item.y < minY) minY = item.y;
+      if (item.y > maxY) maxY = item.y;
+    }
+
+    if ((maxX - minX) > maxWidth || (maxY - minY) > maxHeight) {
+      stabilityQueue.length = 0;
+      stabilityQueue.push(point);
+      return false;
+    }
+
+    if (stabilityQueue.length > requiredCount) {
+      stabilityQueue.shift();
+    }
+
+    return stabilityQueue.length === requiredCount;
+  }
+
+  function setupCustomGazeCursor() {
+    if (typeof webgazer === 'undefined' || typeof document === 'undefined') return;
+
+    try {
+      webgazer.showPredictionPoints(false);
+    } catch (_) {}
+
+    let cursor = null;
+    const cursorSize = 100;
+    const smoothingWindow = 300; // ms
+    const gazeBuffer = [];
+    const stabilityQueue = [];
+
+    try {
+      webgazer.setGazeListener((data, elapsedTime) => {
+        if (data == null || data.x == null || data.y == null) {
+          if (cursor) cursor.style.display = 'none';
+          stabilityQueue.length = 0;
+          return;
+        }
+
+        const now = Date.now();
+        gazeBuffer.push({ x: data.x, y: data.y, timestamp: now });
+
+        // Nettoyer les données de plus de 300ms
+        while (gazeBuffer.length > 0 && now - gazeBuffer[0].timestamp > smoothingWindow) {
+          gazeBuffer.shift();
+        }
+
+        if (gazeBuffer.length === 0) return;
+
+        // Calculer la moyenne des données du buffer
+        const avgX = gazeBuffer.reduce((sum, p) => sum + p.x, 0) / gazeBuffer.length;
+        const avgY = gazeBuffer.reduce((sum, p) => sum + p.y, 0) / gazeBuffer.length;
+        const stable = checkStability(stabilityQueue, { x: avgX, y: avgY }, 100, 80, 5);
+
+        if (!cursor) {
+          cursor = document.createElement('div');
+          cursor.id = 'custom-gaze-cursor';
+          cursor.style.cssText = `
+            position: fixed;
+            width: ${cursorSize}px;
+            height: ${cursorSize}px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 2px solid #000;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 10001;
+            box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
+          `;
+          document.body.appendChild(cursor);
+        }
+
+        cursor.style.display = 'block';
+        cursor.style.left = (avgX - cursorSize / 2) + 'px';
+        cursor.style.top = (avgY - cursorSize / 2) + 'px';
+        cursor.style.background = stable ? 'rgba(39, 174, 96, 0.1)' : 'rgba(255, 255, 255, 0.1)';
+        updateGazeCursorCoords(avgX, avgY);
+      });
+    } catch (e) {
+      console.warn('[Calibration] Impossible de configurer le curseur personnalisé :', e);
+    }
+  }
   // ─── Affichage du titre d'étape ────────────────────────────────────────────
 
   function showTitle(text, subtext) {
@@ -139,6 +404,7 @@
     const { xPct, yPct } = CALIBRATION_GRID[index];
     const x = pxFromPct(xPct, window.innerWidth);
     const y = pxFromPct(yPct, window.innerHeight);
+    updateCalibrationPointCoords(x, y);
 
     const point = document.createElement('div');
     point.className = 'cal-point';
@@ -206,6 +472,8 @@
   // ─── PHASE 2 : Validation ──────────────────────────────────────────────────
 
   function startValidationPhase() {
+    currentCalibrationPoint = null;
+
     // Notifier WebGazer qu'on bascule en mode validation (pas d'apprentissage)
     if (typeof webgazer !== 'undefined') {
       try { webgazer.params.showVideo = false; } catch (_) {}
@@ -449,6 +717,9 @@
       lastScore = null;
     },
 
+    detectFixations,
+    setupCustomGazeCursor,
+
     /**
      * Expose la config pour les tests.
      */
@@ -457,8 +728,18 @@
     VALIDATION_GRID,
 
     // Méthodes internes exposées pour les tests unitaires
-    _helpers: { distance, mean, stdDev, pxFromPct },
+    _helpers: { distance, mean, stdDev, pxFromPct, detectFixations, checkStability },
   };
 
   global.Calibration = Calibration;
+
+  // Auto-setup du curseur personnalisé et du panneau de coordonnées au chargement
+  if (typeof window !== 'undefined' && typeof document !== 'undefined') {
+    window.addEventListener('load', function () {
+      createGazeCoordPanel();
+      if (typeof webgazer !== 'undefined') {
+        setTimeout(() => setupCustomGazeCursor(), 100);
+      }
+    });
+  }
 })(typeof window !== 'undefined' ? window : global);
