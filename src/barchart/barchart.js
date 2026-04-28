@@ -27,6 +27,8 @@ const BarChart = (function () {
   let _svg = null;
   let _resizeHandler = null;
   let _tooltip = null;
+  let _aoiCache = null;      // invalidated on each re-render
+  let _gazeModeActive = false;
 
   // ─── Public API ──────────────────────────────────────────────────────────────
 
@@ -35,7 +37,6 @@ const BarChart = (function () {
 
     if (_resizeHandler) window.removeEventListener('resize', _resizeHandler);
 
-    // Single tooltip shared across re-renders
     if (!document.getElementById('barchart-tooltip')) {
       _tooltip = d3.select('body')
         .append('div')
@@ -48,18 +49,17 @@ const BarChart = (function () {
 
     _render();
 
-    _resizeHandler = _debounce(_render, 300);
+    _resizeHandler = _debounce(function () { _aoiCache = null; _render(); }, 300);
     window.addEventListener('resize', _resizeHandler);
   }
 
   /**
-   * Returns bounding rectangles of each bar and both axes in page coordinates.
-   * Call this after init() and after the page has finished laying out.
-   * Coordinates match WebGazer's {x, y} viewport system.
-   *
-   * @returns {Array<{id: string, label: string, x: number, y: number, width: number, height: number}>}
+   * Returns bounding rectangles (viewport coords) of each bar + both axes.
+   * Result is cached and invalidated after each re-render or resize.
+   * @returns {Array<{id, label, x, y, width, height}>}
    */
   function getAOIs() {
+    if (_aoiCache) return _aoiCache;
     if (!_svg) return [];
 
     const aois = [];
@@ -70,8 +70,8 @@ const BarChart = (function () {
       aois.push({
         id: `bar-${d.label}`,
         label: `Barre ${d.label} — ${d.value.toLocaleString('fr-FR')} €`,
-        x: r.left + window.scrollX,
-        y: r.top + window.scrollY,
+        x: r.left,
+        y: r.top,
         width: r.width,
         height: r.height,
       });
@@ -81,12 +81,8 @@ const BarChart = (function () {
     if (xAxisNode) {
       const r = xAxisNode.getBoundingClientRect();
       aois.push({
-        id: 'x-axis',
-        label: 'Axe X — Mois',
-        x: r.left + window.scrollX,
-        y: r.top + window.scrollY,
-        width: r.width,
-        height: Math.max(r.height, 20),
+        id: 'x-axis', label: 'Axe X — Mois',
+        x: r.left, y: r.top, width: r.width, height: Math.max(r.height, 20),
       });
     }
 
@@ -94,16 +90,67 @@ const BarChart = (function () {
     if (yAxisNode) {
       const r = yAxisNode.getBoundingClientRect();
       aois.push({
-        id: 'y-axis',
-        label: 'Axe Y — Ventes (€)',
-        x: r.left + window.scrollX,
-        y: r.top + window.scrollY,
-        width: Math.max(r.width, 20),
-        height: r.height,
+        id: 'y-axis', label: 'Axe Y — Ventes (€)',
+        x: r.left, y: r.top, width: Math.max(r.width, 20), height: r.height,
       });
     }
 
+    _aoiCache = aois;
     return aois;
+  }
+
+  /**
+   * Enable/disable mouse hover on bars.
+   * Call setGazeMode(true) when gaze tracking starts so mouse doesn't conflict.
+   */
+  function setGazeMode(enabled) {
+    _gazeModeActive = enabled;
+    if (_svg) {
+      _svg.selectAll('.barchart-bar')
+        .style('pointer-events', enabled ? 'none' : 'all');
+    }
+    if (!enabled) gazeLeave();
+  }
+
+  /**
+   * Visual feedback while the user is dwelling on a bar (0 ≤ progress ≤ 1).
+   * Darkens the target bar slightly to signal the interaction is registering.
+   */
+  function gazeDwelling(barId, progress) {
+    if (!_svg) return;
+    _svg.selectAll('.barchart-bar').attr('opacity', function (d) {
+      if (!barId || `bar-${d.label}` !== barId) return 1;
+      return 1 - 0.3 * progress;
+    });
+  }
+
+  /**
+   * Trigger the hover state on a specific bar at gaze position (x, y).
+   */
+  function gazeHover(barId, x, y) {
+    if (!_svg) return;
+    const d = DATA.find(d => `bar-${d.label}` === barId);
+    if (!d) return;
+
+    _svg.selectAll('.barchart-bar')
+      .attr('opacity', b => `bar-${b.label}` === barId ? 0.72 : 1);
+
+    _tooltip
+      .style('opacity', 0.95)
+      .html(
+        `<strong>${d.label} 2024</strong><br/>` +
+        `Ventes&nbsp;: ${d.value.toLocaleString('fr-FR')} €<br/>` +
+        `Trimestre&nbsp;: ${d.quarter}`
+      )
+      .style('left', (x + 16) + 'px')
+      .style('top',  (y - 50) + 'px');
+  }
+
+  /** Hide tooltip and reset all bar opacities. */
+  function gazeLeave() {
+    if (!_svg) return;
+    _svg.selectAll('.barchart-bar').attr('opacity', 1);
+    if (_tooltip) _tooltip.style('opacity', 0);
   }
 
   // ─── Rendering ───────────────────────────────────────────────────────────────
@@ -268,5 +315,5 @@ const BarChart = (function () {
     };
   }
 
-  return { init, getAOIs, data: DATA };
+  return { init, getAOIs, setGazeMode, gazeDwelling, gazeHover, gazeLeave, data: DATA };
 })();

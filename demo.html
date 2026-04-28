@@ -5,94 +5,109 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PIR WebGaze — Démo</title>
   <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script
+    src="https://cdn.jsdelivr.net/npm/webgazer@2.1.0/dist/webgazer.min.js"
+    crossorigin="anonymous"
+    onerror="document.getElementById('webcam-status').textContent='● WebGazer indisponible (hors ligne ?)'"
+  ></script>
   <link rel="stylesheet" href="src/barchart/barchart.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    body {
+    html, body {
+      height: 100%;
       font-family: Arial, sans-serif;
       background: #f0f2f5;
-      min-height: 100vh;
+      overflow: hidden;
+    }
+
+    /* ── Layout ── */
+    #app {
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
     }
 
     header {
       background: #2c3e50;
       color: #fff;
-      padding: 14px 28px;
+      padding: 10px 20px;
       display: flex;
       align-items: center;
       justify-content: space-between;
+      flex-shrink: 0;
     }
-    header h1 { font-size: 18px; font-weight: 600; }
+    header h1 { font-size: 16px; font-weight: 600; }
 
-    /* ── Tab navigation ── */
+    #webcam-status { font-size: 13px; color: #f0a500; }
+
+    /* ── Tabs ── */
     nav {
       background: #fff;
-      border-bottom: 2px solid #e0e0e0;
+      border-bottom: 2px solid #dde;
       display: flex;
-      padding: 0 28px;
+      padding: 0 20px;
+      flex-shrink: 0;
     }
     nav button {
       background: none;
       border: none;
-      padding: 12px 20px;
-      font-size: 14px;
+      padding: 10px 18px;
+      font-size: 13px;
       cursor: pointer;
-      color: #555;
+      color: #666;
       border-bottom: 3px solid transparent;
       margin-bottom: -2px;
     }
-    nav button.active {
-      color: #2c3e50;
-      font-weight: 600;
-      border-bottom-color: #2c3e50;
-    }
+    nav button.active { color: #2c3e50; font-weight: 600; border-bottom-color: #2c3e50; }
     nav button:hover:not(.active) { color: #2c3e50; }
 
-    /* ── Main area ── */
-    main {
-      max-width: 1100px;
-      margin: 28px auto;
-      padding: 0 24px;
+    /* ── Chart area ── */
+    #chart-area {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      padding: 10px;
     }
 
-    .tab-panel { display: none; }
+    .tab-panel { display: none; width: 100%; height: 100%; }
     .tab-panel.active { display: block; }
 
-    /* ── Chart container ── */
     .chart-wrapper {
       background: #fff;
       border-radius: 8px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-      padding: 12px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.09);
       width: 100%;
-      height: 480px;
+      height: 100%;
+      padding: 6px;
     }
 
-    /* Placeholder panels for charts not yet implemented */
     .placeholder {
       background: #fff;
       border-radius: 8px;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.08);
-      height: 480px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.09);
+      width: 100%;
+      height: 100%;
       display: flex;
       align-items: center;
       justify-content: center;
-      color: #aaa;
+      color: #bbb;
       font-size: 15px;
       border: 2px dashed #ddd;
     }
 
     /* ── Controls bar ── */
-    .controls {
-      margin-top: 18px;
+    #controls {
+      background: #fff;
+      border-top: 1px solid #dde;
+      padding: 8px 20px;
       display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
       align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
     }
-    .controls button {
-      padding: 8px 18px;
+    #controls button {
+      padding: 7px 16px;
       border: none;
       border-radius: 5px;
       background: #2c3e50;
@@ -100,29 +115,45 @@
       cursor: pointer;
       font-size: 13px;
     }
-    .controls button:hover { background: #3d5166; }
+    #controls button:disabled { opacity: 0.4; cursor: default; }
+    #controls button:not(:disabled):hover { background: #3d5166; }
+    #controls button.danger { background: #c0392b; }
+    #controls button.danger:not(:disabled):hover { background: #e74c3c; }
 
-    /* ── AOI output ── */
-    #aoi-output {
-      margin-top: 16px;
-      background: #1a1a2e;
-      color: #a8ff78;
-      padding: 14px 18px;
-      border-radius: 6px;
-      font-family: 'Courier New', monospace;
+    #cal-score {
+      margin-left: auto;
       font-size: 12px;
-      max-height: 220px;
-      overflow-y: auto;
+      color: #555;
+    }
+    #cal-score span { font-weight: bold; color: #27ae60; }
+
+    /* ── Gaze cursor (dot + dwell ring) ── */
+    #gaze-cursor {
+      position: fixed;
+      pointer-events: none;
       display: none;
-      white-space: pre;
+      z-index: 10000;
+      /* centered on gaze point */
+      transform: translate(-50%, -50%);
+    }
+    #gaze-dot {
+      position: absolute;
+      width: 14px;
+      height: 14px;
+      background: rgba(231, 76, 60, 0.75);
+      border: 2px solid rgba(255,255,255,0.95);
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      box-shadow: 0 0 6px rgba(231,76,60,0.55);
     }
   </style>
 </head>
 <body>
+<div id="app">
 
   <header>
     <h1>PIR WebGaze — Prototype de démo</h1>
-    <span id="webcam-status" style="font-size:13px; color: #f0a500;">● Webcam non connectée</span>
+    <span id="webcam-status">● Webcam inactive</span>
   </header>
 
   <nav>
@@ -131,78 +162,235 @@
     <button data-tab="tab-scatter">Scatter Plot</button>
   </nav>
 
-  <main>
-    <!-- Bar Chart (US-1.3) -->
-    <div id="tab-barchart" class="tab-panel active">
+  <div id="chart-area">
+    <div id="tab-barchart"  class="tab-panel active">
       <div id="bar-chart-container" class="chart-wrapper"></div>
     </div>
-
-    <!-- Line Chart (US-2.3) — à implémenter -->
     <div id="tab-linechart" class="tab-panel">
       <div id="line-chart-container" class="placeholder">Line Chart — à intégrer (Dev 2)</div>
     </div>
-
-    <!-- Scatter Plot (US-3.4) — à implémenter -->
-    <div id="tab-scatter" class="tab-panel">
+    <div id="tab-scatter"   class="tab-panel">
       <div id="scatter-chart-container" class="placeholder">Scatter Plot — à intégrer (Dev 3)</div>
     </div>
+  </div>
 
-    <!-- Controls -->
-    <div class="controls">
-      <button id="btn-calibrate">Calibrer</button>
-      <button id="btn-start">Démarrer</button>
-      <button id="btn-stop" disabled>Arrêter</button>
-      <button id="btn-export" disabled>Exporter JSON</button>
-      <button id="btn-aois">Afficher les AOI</button>
-    </div>
+  <div id="controls">
+    <button id="btn-calibrate">Calibrer</button>
+    <button id="btn-start">▶ Démarrer</button>
+    <button id="btn-stop" disabled>■ Arrêter</button>
+    <button id="btn-aois">Afficher AOI</button>
+    <span id="cal-score"></span>
+  </div>
 
-    <pre id="aoi-output"></pre>
-  </main>
+</div>
 
-  <script src="src/barchart/barchart.js"></script>
-  <script>
-    // ── Tab switching ─────────────────────────────────────────────────────────
-    document.querySelectorAll('nav button').forEach(btn => {
-      btn.addEventListener('click', () => {
-        document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
-        document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-        btn.classList.add('active');
-        document.getElementById(btn.dataset.tab).classList.add('active');
+<!-- Gaze cursor: dot + SVG dwell-progress ring -->
+<div id="gaze-cursor">
+  <!-- Ring drawn as an SVG arc that fills clockwise during dwell -->
+  <svg id="dwell-svg" viewBox="-22 -22 44 44" width="44" height="44"
+       style="position:absolute; transform:translate(-50%,-50%);">
+    <!-- Background track -->
+    <circle r="18" fill="none" stroke="rgba(255,255,255,0.25)" stroke-width="3"/>
+    <!-- Progress arc (stroke-dasharray updated by JS) -->
+    <circle id="dwell-ring" r="18" fill="none"
+            stroke="#f39c12" stroke-width="3"
+            stroke-linecap="round"
+            stroke-dasharray="0 113.1"
+            transform="rotate(-90)"/>
+  </svg>
+  <div id="gaze-dot"></div>
+</div>
 
-        // Re-render bar chart if its tab becomes visible (handles hidden-layout sizing)
-        if (btn.dataset.tab === 'tab-barchart') {
-          BarChart.init('bar-chart-container');
-        }
-      });
+<script src="src/barchart/barchart.js"></script>
+<script>
+  // ── Calibration score ────────────────────────────────────────────────────────
+  (function () {
+    try {
+      const stored = JSON.parse(localStorage.getItem('webgaze_calibration') || 'null');
+      if (stored && stored.meanError != null) {
+        const ok = stored.meanError <= 150;
+        document.getElementById('cal-score').innerHTML =
+          `Dernière calibration : <span style="color:${ok ? '#27ae60' : '#e74c3c'}">${stored.meanError.toFixed(1)} px</span>`;
+      } else {
+        document.getElementById('cal-score').textContent = 'Aucune calibration — calibrez avant de tester.';
+      }
+    } catch (_) {}
+  })();
+
+  // ── Tab switching ────────────────────────────────────────────────────────────
+  document.querySelectorAll('nav button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('nav button').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById(btn.dataset.tab).classList.add('active');
+      if (btn.dataset.tab === 'tab-barchart') {
+        BarChart.init('bar-chart-container');
+        if (_gazeModeOn) BarChart.setGazeMode(true);
+      }
     });
+  });
 
-    // ── Bar Chart ─────────────────────────────────────────────────────────────
-    BarChart.init('bar-chart-container');
+  // ── Bar Chart ────────────────────────────────────────────────────────────────
+  BarChart.init('bar-chart-container');
 
-    // ── AOI display ───────────────────────────────────────────────────────────
-    document.getElementById('btn-aois').addEventListener('click', () => {
-      const aois = BarChart.getAOIs();
-      const out = document.getElementById('aoi-output');
-      out.style.display = 'block';
-      out.textContent = JSON.stringify(aois, null, 2);
-      console.log('[BarChart] AOIs:', aois);
-    });
+  // ── Gaze cursor elements ─────────────────────────────────────────────────────
+  const gazeCursor = document.getElementById('gaze-cursor');
+  const dwellRing  = document.getElementById('dwell-ring');
+  const RING_CIRC  = 2 * Math.PI * 18; // ≈ 113.1 px
 
-    // ── Calibration shortcut ──────────────────────────────────────────────────
-    document.getElementById('btn-calibrate').addEventListener('click', () => {
-      window.location.href = 'calibration.html';
-    });
+  function _setDwellRing(progress) {
+    const filled = Math.min(progress, 1) * RING_CIRC;
+    dwellRing.setAttribute('stroke-dasharray', `${filled.toFixed(1)} ${RING_CIRC.toFixed(1)}`);
+    dwellRing.style.opacity = progress > 0 ? '1' : '0';
+  }
 
-    // Stubs — Start / Stop / Export will be wired by Dev 2 & Dev 3
-    document.getElementById('btn-start').addEventListener('click', () => {
-      console.log('[Demo] GazeCapture.start() — à brancher (Dev 2)');
-    });
-    document.getElementById('btn-stop').addEventListener('click', () => {
-      console.log('[Demo] GazeCapture.stop() — à brancher (Dev 2)');
-    });
-    document.getElementById('btn-export').addEventListener('click', () => {
-      console.log('[Demo] GazeLogger.download() — à brancher (Dev 3)');
-    });
-  </script>
+  // ── Dwell state machine ──────────────────────────────────────────────────────
+  const DWELL_MS  = 700;  // ms de regard pour déclencher le hover
+  const GRACE_MS  = 180;  // tolérance si le regard sort brièvement d'une barre
+
+  let _dwell = {
+    barId:      null,   // AOI id de la barre regardée
+    startedAt:  null,   // timestamp début dwell
+    hovering:   false,  // tooltip déjà affiché ?
+    graceTimer: null,   // timeout de grâce
+  };
+
+  function _onGazeBarEnter(barId) {
+    if (_dwell.graceTimer) { clearTimeout(_dwell.graceTimer); _dwell.graceTimer = null; }
+    if (_dwell.barId === barId) return; // même barre, rien à faire
+    _resetDwell();
+    _dwell.barId = barId;
+    _dwell.startedAt = Date.now();
+  }
+
+  function _onGazeBarLeave() {
+    if (!_dwell.barId) return;
+    _dwell.graceTimer = setTimeout(() => {
+      _resetDwell();
+    }, GRACE_MS);
+  }
+
+  function _resetDwell() {
+    if (_dwell.graceTimer) { clearTimeout(_dwell.graceTimer); _dwell.graceTimer = null; }
+    if (_dwell.hovering) { BarChart.gazeLeave(); }
+    BarChart.gazeDwelling(null, 0);
+    _setDwellRing(0);
+    _dwell = { barId: null, startedAt: null, hovering: false, graceTimer: null };
+  }
+
+  function _tickDwell(x, y) {
+    if (!_dwell.barId) return;
+    const elapsed  = Date.now() - _dwell.startedAt;
+    const progress = Math.min(elapsed / DWELL_MS, 1);
+    _setDwellRing(progress);
+
+    if (!_dwell.hovering) {
+      BarChart.gazeDwelling(_dwell.barId, progress);
+    }
+    if (!_dwell.hovering && elapsed >= DWELL_MS) {
+      BarChart.gazeHover(_dwell.barId, x, y);
+      _dwell.hovering = true;
+    } else if (_dwell.hovering) {
+      // Keep tooltip following gaze
+      BarChart.gazeHover(_dwell.barId, x, y);
+    }
+  }
+
+  // ── WebGazer setup ───────────────────────────────────────────────────────────
+  let _wgStarted  = false;
+  let _gazeModeOn = false;
+  let _biasX = 0, _biasY = 0;
+
+  function _loadBias() {
+    try {
+      const s = JSON.parse(localStorage.getItem('webgaze_calibration') || 'null');
+      _biasX = (s && s.biasX) || 0;
+      _biasY = (s && s.biasY) || 0;
+    } catch (_) {}
+  }
+
+  const statusEl = document.getElementById('webcam-status');
+
+  function _gazeListener(data) {
+    if (!data) return;
+    const x = data.x - _biasX;
+    const y = data.y - _biasY;
+
+    // Move cursor
+    gazeCursor.style.left = x + 'px';
+    gazeCursor.style.top  = y + 'px';
+
+    // Hit-test: only bar AOIs trigger dwell
+    const barAOIs = BarChart.getAOIs().filter(a => a.id.startsWith('bar-'));
+    const hit = barAOIs.find(a => x >= a.x && x <= a.x + a.width && y >= a.y && y <= a.y + a.height);
+
+    if (hit) {
+      _onGazeBarEnter(hit.id);
+    } else {
+      _onGazeBarLeave();
+    }
+    _tickDwell(x, y);
+  }
+
+  document.getElementById('btn-start').addEventListener('click', async function () {
+    this.disabled = true;
+    statusEl.textContent = '● Chargement webcam…';
+    statusEl.style.color = '#f0a500';
+    _loadBias();
+
+    try {
+      if (!_wgStarted) {
+        await webgazer.setRegression('ridge').setTracker('TFFaceMesh').begin();
+        webgazer.applyKalmanFilter(true);
+        webgazer.showVideo(true).showFaceOverlay(false).showFaceFeedbackBox(false);
+        _wgStarted = true;
+      } else {
+        webgazer.resume();
+      }
+
+      webgazer.setGazeListener(_gazeListener);
+      gazeCursor.style.display = 'block';
+      _gazeModeOn = true;
+      BarChart.setGazeMode(true);   // désactive le hover souris
+
+      statusEl.textContent = '● Webcam active';
+      statusEl.style.color = '#27ae60';
+      document.getElementById('btn-stop').disabled = false;
+
+    } catch (err) {
+      statusEl.textContent = '● Erreur : ' + (err.message || err);
+      statusEl.style.color = '#e74c3c';
+      this.disabled = false;
+    }
+  });
+
+  document.getElementById('btn-stop').addEventListener('click', function () {
+    webgazer.clearGazeListener();
+    webgazer.pause();
+    gazeCursor.style.display = 'none';
+    _resetDwell();
+    _gazeModeOn = false;
+    BarChart.setGazeMode(false);   // réactive le hover souris
+
+    statusEl.textContent = '● Webcam inactive';
+    statusEl.style.color = '#f0a500';
+    document.getElementById('btn-start').disabled = false;
+    this.disabled = true;
+  });
+
+  // ── Calibrate shortcut ───────────────────────────────────────────────────────
+  document.getElementById('btn-calibrate').addEventListener('click', () => {
+    if (_wgStarted) { try { webgazer.pause(); } catch (_) {} }
+    window.location.href = 'calibration.html';
+  });
+
+  // ── AOI debug ────────────────────────────────────────────────────────────────
+  document.getElementById('btn-aois').addEventListener('click', () => {
+    const aois = BarChart.getAOIs();
+    console.table(aois);
+    alert(`${aois.length} AOI — voir console (F12).`);
+  });
+</script>
 </body>
 </html>
