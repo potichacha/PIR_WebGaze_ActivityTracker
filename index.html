@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PIR Activity Tracker — Démarrage</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: Arial, sans-serif;
+      background: #0f0f1a;
+      color: #eee;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 40px 20px;
+    }
+    .card {
+      background: #16213e;
+      border-radius: 16px;
+      padding: 40px 48px;
+      max-width: 620px;
+      width: 100%;
+    }
+    h1 { font-size: 1.6rem; color: #4ecdc4; margin-bottom: 6px; }
+    .subtitle {
+      font-size: 0.9rem; color: #888;
+      margin-bottom: 30px; line-height: 1.6;
+    }
+    .section-title {
+      font-size: 0.72rem;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      color: #4ecdc4;
+      margin: 24px 0 14px;
+      border-bottom: 1px solid #1e3a5f;
+      padding-bottom: 6px;
+    }
+    .field { margin-bottom: 16px; }
+    label {
+      display: block; font-size: 0.88rem;
+      color: #bbb; margin-bottom: 6px;
+    }
+    input[type="text"],
+    input[type="number"],
+    select {
+      width: 100%;
+      background: #0d1b2a;
+      border: 1px solid #2c3e50;
+      border-radius: 8px;
+      color: #eee;
+      font-size: 0.95rem;
+      padding: 10px 14px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    input:focus, select:focus { border-color: #4ecdc4; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+    .radio-group {
+      display: flex; gap: 16px; flex-wrap: wrap; margin-top: 4px;
+    }
+    .radio-group label {
+      display: flex; align-items: center; gap: 7px;
+      font-size: 0.9rem; color: #ccc; cursor: pointer; margin: 0;
+    }
+    .radio-group input[type="radio"] {
+      accent-color: #4ecdc4; width: 16px; height: 16px;
+    }
+    .required { color: #e74c3c; margin-left: 2px; }
+    #error-msg {
+      display: none; color: #e74c3c;
+      font-size: 0.88rem; margin-bottom: 12px;
+      background: #2a0d0d; border: 1px solid #e74c3c;
+      border-radius: 8px; padding: 10px 14px;
+    }
+    .btn {
+      display: inline-block; padding: 14px 36px;
+      border-radius: 10px; font-size: 1rem;
+      cursor: pointer; border: none; font-weight: bold;
+      transition: opacity 0.2s; margin-top: 6px; width: 100%;
+    }
+    .btn:hover { opacity: 0.85; }
+    .btn-primary { background: #4ecdc4; color: #0f0f1a; }
+    .steps {
+      display: flex; gap: 10px; margin-bottom: 28px; flex-wrap: wrap;
+    }
+    .step {
+      flex: 1; min-width: 130px;
+      background: #0d1b2a; border-radius: 10px;
+      padding: 12px 14px; font-size: 0.82rem;
+      border: 1px solid #1e3a5f; color: #888;
+      line-height: 1.5;
+    }
+    .step strong { display: block; color: #4ecdc4; margin-bottom: 3px; }
+    .step.active { border-color: #4ecdc4; background: #0d2235; color: #ccc; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>PIR Activity Tracker</h1>
+  <p class="subtitle">
+    Bienvenue dans la session de test eye-tracking.<br>
+    Remplissez ce formulaire, puis vous serez redirigé vers la calibration.
+  </p>
+
+  <!-- Étapes -->
+  <div class="steps">
+    <div class="step active">
+      <strong>① Questionnaire</strong>
+      Données participant — maintenant
+    </div>
+    <div class="step">
+      <strong>② Calibration</strong>
+      25 pts cliquables + balle animée
+    </div>
+    <div class="step">
+      <strong>③ Tâches</strong>
+      Activités suivies par eye-tracking
+    </div>
+  </div>
+
+  <!-- ── Identité ── -->
+  <div class="section-title">Identité</div>
+  <div class="row">
+    <div class="field">
+      <label>ID participant <span class="required">*</span></label>
+      <input type="text" id="pid" placeholder="P01, P02…" autocomplete="off" />
+    </div>
+    <div class="field">
+      <label>Date</label>
+      <input type="text" id="date" readonly />
+    </div>
+  </div>
+  <div class="row">
+    <div class="field">
+      <label>Âge</label>
+      <input type="number" id="age" min="16" max="80" placeholder="—" />
+    </div>
+    <div class="field">
+      <label>Genre</label>
+      <div class="radio-group" style="margin-top:8px;">
+        <label><input type="radio" name="gender" value="homme" /> Homme</label>
+        <label><input type="radio" name="gender" value="femme" /> Femme</label>
+        <label><input type="radio" name="gender" value="non-binaire" /> NB</label>
+        <label><input type="radio" name="gender" value="nr" /> —</label>
+      </div>
+    </div>
+  </div>
+  <div class="field">
+    <label>Port de lunettes / lentilles</label>
+    <div class="radio-group">
+      <label><input type="radio" name="glasses" value="non" /> Non</label>
+      <label><input type="radio" name="glasses" value="lunettes" /> Lunettes</label>
+      <label><input type="radio" name="glasses" value="lentilles" /> Lentilles</label>
+    </div>
+  </div>
+
+  <!-- ── Environnement ── -->
+  <div class="section-title">Environnement</div>
+  <div class="row">
+    <div class="field">
+      <label>Navigateur</label>
+      <select id="browser">
+        <option value="">—</option>
+        <option>Chrome</option>
+        <option>Firefox</option>
+        <option>Edge</option>
+        <option>Safari</option>
+        <option>Autre</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Résolution écran</label>
+      <input type="text" id="resolution" readonly />
+    </div>
+  </div>
+  <div class="field">
+    <label>Conditions d'éclairage</label>
+    <div class="radio-group">
+      <label><input type="radio" name="lighting" value="sombre" /> Sombre</label>
+      <label><input type="radio" name="lighting" value="normal" /> Normal</label>
+      <label><input type="radio" name="lighting" value="lumineux" /> Lumineux</label>
+      <label><input type="radio" name="lighting" value="contre-jour" /> Contre-jour</label>
+    </div>
+  </div>
+
+  <div id="error-msg">Le champ "ID participant" est obligatoire.</div>
+
+  <button class="btn btn-primary" id="btn-start">
+    Démarrer la calibration →
+  </button>
+</div>
+
+<script>
+  window.addEventListener('load', function () {
+    document.getElementById('date').value = new Date().toISOString().slice(0, 10);
+    document.getElementById('resolution').value =
+      window.screen.width + '×' + window.screen.height;
+    document.getElementById('pid').focus();
+  });
+
+  function getRadio(name) {
+    const el = document.querySelector('input[name="' + name + '"]:checked');
+    return el ? el.value : null;
+  }
+
+  document.getElementById('btn-start').addEventListener('click', function () {
+    const pid = document.getElementById('pid').value.trim();
+    if (!pid) {
+      document.getElementById('error-msg').style.display = 'block';
+      document.getElementById('pid').focus();
+      return;
+    }
+    document.getElementById('error-msg').style.display = 'none';
+
+    const sessionData = {
+      participant_id:    pid,
+      date:              document.getElementById('date').value,
+      age:               document.getElementById('age').value || null,
+      gender:            getRadio('gender'),
+      glasses:           getRadio('glasses'),
+      browser:           document.getElementById('browser').value || null,
+      lighting:          getRadio('lighting'),
+      screen_resolution: document.getElementById('resolution').value || null,
+    };
+
+    try {
+      sessionStorage.setItem('calibration_session', JSON.stringify(sessionData));
+    } catch (_) {}
+
+    window.location.href = 'calibration.html';
+  });
+
+  // Soumettre avec Entrée depuis le champ PID
+  document.getElementById('pid').addEventListener('keydown', function (e) {
+    if (e.key === 'Enter') document.getElementById('btn-start').click();
+  });
+</script>
+</body>
+</html>

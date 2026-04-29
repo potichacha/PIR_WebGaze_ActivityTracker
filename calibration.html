@@ -144,6 +144,10 @@
   // ── Bouton Effacer ────────────────────────────────────────────────────────
   document.getElementById('btn-reset').addEventListener('click', function () {
     Calibration.reset();
+    // Vider aussi les données WebGazer en mémoire
+    if (typeof webgazer !== 'undefined') {
+      try { webgazer.clearData(); } catch (_) {}
+    }
     document.getElementById('last-score-text').textContent = 'aucune';
     document.getElementById('bias-display').textContent = '—';
     document.getElementById('score-display').style.display = 'none';

@@ -70,41 +70,21 @@
     // [E] LOWESS post-processing
     LOWESS_ENABLED:            true,
     LOWESS_BANDWIDTH:          0.45,  // fraction de points utilisés pour chaque prédiction locale
-    // ── Lissage temps réel ──────────────────────────────────────────────────
-    // Kalman retuné
-    KALMAN_Q:                  0.05,  // bruit processus (était 0.5) — moins de drift
-    KALMAN_R:                  200,   // bruit mesure   (était 50)  — plus de lissage
-    KALMAN_ADAPTIVE:           true,  // adapte R selon la vitesse du regard
-    KALMAN_ADAPTIVE_SCALE:     300,   // px/ms → contrib vitesse dans R adaptatif
-    // EMA pré-Kalman
-    EMA_ENABLED:               true,
-    EMA_ALPHA:                 0.35,  // 0 = aucun lissage, 1 = bloque tout
-    // Fenêtre glissante (moyenne)
-    WINDOW_ENABLED:            true,
-    WINDOW_SIZE:               5,     // frames (~165 ms à 30Hz)
-    // Filtre médian glissant
-    MEDIAN_ENABLED:            true,
-    MEDIAN_SIZE:               7,     // frames (impair recommandé)
-    // Zone morte
-    DEAD_ZONE_ENABLED:         true,
-    DEAD_ZONE_PX:              12,    // px — en dessous, le curseur ne bouge pas
-    // One Euro Filter
-    ONE_EURO_ENABLED:          true,
-    ONE_EURO_MIN_CUTOFF:       0.8,   // Hz — lissage au repos (plus bas = plus lisse)
-    ONE_EURO_BETA:             0.005, // réactivité aux mouvements rapides
-    ONE_EURO_D_CUTOFF:         1.0,   // Hz — coupure sur la dérivée
-    // Double Kalman (cascade)
-    DOUBLE_KALMAN_ENABLED:     true,
-    DOUBLE_KALMAN_Q:           0.02,
-    DOUBLE_KALMAN_R:           350,
-    // Snap-to-fixation I-DT temps réel
-    SNAP_FIXATION_ENABLED:     true,
-    SNAP_DISPERSION_PX:        60,    // px — seuil de dispersion pour déclarer une fixation
-    SNAP_DURATION_MS:          120,   // ms — durée minimum pour verrouiller
-    SNAP_BUFFER_MS:            300,   // ms — fenêtre temporelle du buffer temps réel
+    // ── Lissage temps réel — One Euro Filter uniquement ────────────────────
+    // On laisse WebGazer gérer son propre Kalman interne (applyKalmanFilter).
+    // On ajoute seulement One Euro par-dessus : lisse fort au repos,
+    // laisse passer les saccades rapides sans lag.
+    ONE_EURO_MIN_CUTOFF:       1.0,   // Hz — plus haut = moins de lag, moins de lissage
+    ONE_EURO_BETA:             0.007, // réactivité saccades : augmenter si encore trop lent
+    ONE_EURO_D_CUTOFF:         1.0,   // Hz — coupure sur la dérivée (laisser à 1.0)
+    // Kalman conservé uniquement pour l'API interne (non utilisé dans getFilteredPrediction)
+    KALMAN_Q:                  0.05,
+    KALMAN_R:                  200,
+    KALMAN_ADAPTIVE:           false,
+    KALMAN_ADAPTIVE_SCALE:     300,
     // Validation étendue
-    COLLECT_DURATION_MS_EXTENDED: 2000, // ms — collecte plus longue pour IDW précis
-    VALIDATION_POINTS_EXTENDED:   9,    // nœuds IDW supplémentaires
+    COLLECT_DURATION_MS_EXTENDED: 2000,
+    VALIDATION_POINTS_EXTENDED:   9
   };
 
   // ─── Grille de 25 points en % du viewport ──────────────────────────────────
@@ -552,20 +532,9 @@
   let currentPointIndex  = 0;
   let lastScore          = null;
   let onCompleteCallback = null;
-  let kalman             = new KalmanFilter();
-  let kalman2            = new KalmanFilter(CONFIG.DOUBLE_KALMAN_Q, CONFIG.DOUBLE_KALMAN_R);
+  let kalman             = new KalmanFilter();   // conservé pour l'API interne
   let oneEuro            = new OneEuroFilter();
   let lastPredTime       = 0;
-
-  // EMA pré-Kalman
-  let emaX = null, emaY = null;
-
-  // Buffer fenêtre glissante + médian
-  let gazeWindowBuf = [];   // [{x, y}] — partagé fenêtre ET médian
-  let gazeRealTimeBuf = []; // [{x, y, ts}] — pour snap-to-fixation
-
-  // Dernière sortie (zone morte)
-  let lastOutX = null, lastOutY = null;
 
   // Correction de biais
   let biasX = 0;
@@ -656,13 +625,6 @@
   //   → [8] Zone morte
   //   → [9] Snap-to-fixation I-DT temps réel
 
-  function _medianOf(arr) {
-    if (!arr.length) return 0;
-    const s = [...arr].sort((a, b) => a - b);
-    const m = Math.floor(s.length / 2);
-    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
-  }
-
   function getFilteredPrediction() {
     if (typeof webgazer === 'undefined') return null;
     let raw;
@@ -670,105 +632,28 @@
     if (!raw || raw.x == null) return null;
 
     const now = Date.now();
-    const dt  = lastPredTime ? now - lastPredTime : 33;
     lastPredTime = now;
 
     let x = raw.x, y = raw.y;
 
-    // ── [1] EMA pré-Kalman ────────────────────────────────────────────────
-    if (CONFIG.EMA_ENABLED) {
-      const a = CONFIG.EMA_ALPHA;
-      if (emaX === null) { emaX = x; emaY = y; }
-      emaX = a * x + (1 - a) * emaX;
-      emaY = a * y + (1 - a) * emaY;
-      x = emaX; y = emaY;
-    }
+    // ── [1] One Euro Filter ───────────────────────────────────────────────
+    // Seul filtre appliqué par-dessus le Kalman natif de WebGazer.
+    // Lisse les micro-tremblements au repos sans ajouter de lag sur les saccades.
+    const oe = oneEuro.filter(x, y, now);
+    x = oe.x; y = oe.y;
 
-    // ── [2] Fenêtre glissante (moyenne) ──────────────────────────────────
-    if (CONFIG.WINDOW_ENABLED) {
-      gazeWindowBuf.push({ x, y });
-      if (gazeWindowBuf.length > CONFIG.WINDOW_SIZE) gazeWindowBuf.shift();
-      x = gazeWindowBuf.reduce((s, p) => s + p.x, 0) / gazeWindowBuf.length;
-      y = gazeWindowBuf.reduce((s, p) => s + p.y, 0) / gazeWindowBuf.length;
-    }
-
-    // ── [3] Filtre médian glissant ────────────────────────────────────────
-    if (CONFIG.MEDIAN_ENABLED) {
-      // Réutilise le même buffer que la fenêtre si activé, sinon buffer dédié
-      const buf = CONFIG.WINDOW_ENABLED ? gazeWindowBuf : (() => {
-        gazeWindowBuf.push({ x, y });
-        if (gazeWindowBuf.length > CONFIG.MEDIAN_SIZE) gazeWindowBuf.shift();
-        return gazeWindowBuf;
-      })();
-      const sz = CONFIG.MEDIAN_SIZE;
-      const slice = buf.slice(-sz);
-      x = _medianOf(slice.map(p => p.x));
-      y = _medianOf(slice.map(p => p.y));
-    }
-
-    // ── [4] Kalman adaptatif principal ────────────────────────────────────
-    const k1 = kalman.update(x, y, dt);
-    x = k1.x; y = k1.y;
-
-    // ── [5] One Euro Filter ───────────────────────────────────────────────
-    if (CONFIG.ONE_EURO_ENABLED) {
-      const oe = oneEuro.filter(x, y, now);
-      x = oe.x; y = oe.y;
-    }
-
-    // ── [6] Double Kalman (cascade) ───────────────────────────────────────
-    if (CONFIG.DOUBLE_KALMAN_ENABLED) {
-      const k2 = kalman2.update(x, y, dt);
-      x = k2.x; y = k2.y;
-    }
-
-    // ── [7] Correction spatiale IDW + LOWESS ──────────────────────────────
+    // ── [2] Correction spatiale IDW + LOWESS (après validation) ──────────
     if (idwNodes.length > 0) {
       const idw    = applyIDWCorrection(x, y);
       const lowess = applyLOWESS(idw.x, idw.y);
       x = lowess.x; y = lowess.y;
     } else {
-      // Fallback biais global + quadrant avant la première validation
+      // Avant la première validation : biais global + quadrant
       const q = getQuadrant(x, y);
       x = x - biasX - quadrantBias[q].x;
       y = y - biasY - quadrantBias[q].y;
     }
 
-    // ── [8] Zone morte ────────────────────────────────────────────────────
-    if (CONFIG.DEAD_ZONE_ENABLED && lastOutX !== null) {
-      const d = Math.sqrt((x - lastOutX) ** 2 + (y - lastOutY) ** 2);
-      if (d < CONFIG.DEAD_ZONE_PX) {
-        return { x: lastOutX, y: lastOutY };
-      }
-    }
-
-    // ── [9] Snap-to-fixation I-DT temps réel ─────────────────────────────
-    if (CONFIG.SNAP_FIXATION_ENABLED) {
-      gazeRealTimeBuf.push({ x, y, timestamp: now });
-      // Purger les points hors fenêtre temporelle
-      while (gazeRealTimeBuf.length &&
-             now - gazeRealTimeBuf[0].timestamp > CONFIG.SNAP_BUFFER_MS) {
-        gazeRealTimeBuf.shift();
-      }
-      if (gazeRealTimeBuf.length >= 2) {
-        const dur = gazeRealTimeBuf[gazeRealTimeBuf.length - 1].timestamp -
-                    gazeRealTimeBuf[0].timestamp;
-        if (dur >= CONFIG.SNAP_DURATION_MS) {
-          // Calculer la dispersion du buffer
-          const xs = gazeRealTimeBuf.map(p => p.x);
-          const ys = gazeRealTimeBuf.map(p => p.y);
-          const disp = (Math.max(...xs) - Math.min(...xs)) +
-                       (Math.max(...ys) - Math.min(...ys));
-          if (disp <= CONFIG.SNAP_DISPERSION_PX) {
-            // Fixation détectée — verrouiller sur le centroïde
-            x = xs.reduce((s, v) => s + v, 0) / xs.length;
-            y = ys.reduce((s, v) => s + v, 0) / ys.length;
-          }
-        }
-      }
-    }
-
-    lastOutX = x; lastOutY = y;
     return { x, y };
   }
 
@@ -892,11 +777,129 @@
     }
   }
 
+  // ─── PHASE -1 : Questionnaire pré-calibration ────────────────────────────
+  // Collecte les informations participant avant de démarrer.
+  // Les données sont stockées dans calibrationSession et accessibles via
+  // Calibration.getSessionData().
+
+  let calibrationSession = null;
+
+  function startPreQuestionnairePhase(onDone) {
+    // Si les données viennent de index.html via sessionStorage, on saute le formulaire
+    try {
+      const stored = sessionStorage.getItem('calibration_session');
+      if (stored) {
+        calibrationSession = JSON.parse(stored);
+        sessionStorage.removeItem('calibration_session');
+        onDone();
+        return;
+      }
+    } catch (_) {}
+
+    createOverlay();
+    showTitle('Informations participant', 'Remplissez ce formulaire avant de commencer');
+
+    const form = document.createElement('div');
+    form.style.cssText = `
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: #16213e; border-radius: 16px;
+      padding: 32px 40px; max-width: 520px; width: 90%;
+      color: #eee; font-family: Arial, sans-serif;
+      overflow-y: auto; max-height: 80vh;
+    `;
+
+    const fieldStyle = 'margin-bottom:16px;';
+    const labelStyle = 'display:block;font-size:0.85rem;color:#aaa;margin-bottom:6px;';
+    const inputStyle = `
+      width:100%; background:#0d1b2a; border:1px solid #2c3e50;
+      border-radius:8px; color:#eee; font-size:0.9rem;
+      padding:9px 12px; outline:none; box-sizing:border-box;
+    `;
+    const radioGroupStyle = 'display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;';
+    const radioLabelStyle = 'display:flex;align-items:center;gap:6px;font-size:0.88rem;color:#ccc;cursor:pointer;';
+
+    function field(labelTxt, inputHtml) {
+      return `<div style="${fieldStyle}">
+        <label style="${labelStyle}">${labelTxt}</label>
+        ${inputHtml}
+      </div>`;
+    }
+
+    function radioGroup(name, options) {
+      return `<div style="${radioGroupStyle}">${options.map(o =>
+        `<label style="${radioLabelStyle}">
+          <input type="radio" name="${name}" value="${o.v}"
+            style="accent-color:#4ecdc4;width:15px;height:15px;" />
+          ${o.l}
+        </label>`
+      ).join('')}</div>`;
+    }
+
+    form.innerHTML = `
+      <h3 style="margin:0 0 20px;color:#4ecdc4;font-size:1.1rem;">Session de test — Données participant</h3>
+      ${field('ID participant <span style="color:#e74c3c">*</span>',
+        `<input type="text" id="q-pid" placeholder="P01, P02…" style="${inputStyle}" />`)}
+      ${field('Âge',
+        `<input type="number" id="q-age" min="16" max="80" placeholder="—" style="${inputStyle}" />`)}
+      ${field('Genre', radioGroup('q-gender', [
+        {v:'homme',l:'Homme'},{v:'femme',l:'Femme'},
+        {v:'non-binaire',l:'Non-binaire'},{v:'nr',l:'Préfère ne pas répondre'}
+      ]))}
+      ${field('Port de lunettes / lentilles', radioGroup('q-glasses', [
+        {v:'non',l:'Non'},{v:'lunettes',l:'Lunettes'},{v:'lentilles',l:'Lentilles'}
+      ]))}
+      ${field('Navigateur', `<select id="q-browser" style="${inputStyle}">
+        <option value="">—</option>
+        <option>Chrome</option><option>Firefox</option>
+        <option>Edge</option><option>Safari</option><option>Autre</option>
+      </select>`)}
+      ${field('Conditions d\'éclairage', radioGroup('q-lighting', [
+        {v:'sombre',l:'Sombre'},{v:'normal',l:'Normal'},
+        {v:'lumineux',l:'Lumineux'},{v:'contre-jour',l:'Contre-jour'}
+      ]))}
+      <div id="q-error" style="color:#e74c3c;font-size:0.85rem;margin-bottom:12px;display:none;">
+        L'ID participant est obligatoire.
+      </div>
+      <button id="q-submit" style="${_btnStyle('#4ecdc4')}color:#0f0f1a;font-weight:bold;width:100%;margin:0;">
+        Continuer vers la calibration →
+      </button>
+    `;
+
+    overlay.appendChild(form);
+
+    document.getElementById('q-submit').addEventListener('click', () => {
+      const pid = document.getElementById('q-pid').value.trim();
+      if (!pid) {
+        document.getElementById('q-error').style.display = 'block';
+        document.getElementById('q-pid').focus();
+        return;
+      }
+      const getRadio = name => {
+        const el = form.querySelector(`input[name="${name}"]:checked`);
+        return el ? el.value : null;
+      };
+      calibrationSession = {
+        participant_id: pid,
+        date:           new Date().toISOString().slice(0, 10),
+        age:            document.getElementById('q-age').value || null,
+        gender:         getRadio('q-gender'),
+        glasses:        getRadio('q-glasses'),
+        browser:        document.getElementById('q-browser').value || null,
+        lighting:       getRadio('q-lighting'),
+        screen_resolution: typeof screen !== 'undefined'
+          ? screen.width + 'x' + screen.height : null,
+      };
+      removeOverlay();
+      onDone();
+    });
+  }
+
   // ─── PHASE 0 : Guidance / miroir webcam ───────────────────────────────────
 
   function startGuidancePhase(onReady) {
     createOverlay();
-    showTitle('Positionnement', 'Centrez votre visage dans le cadre avant de commencer');
+    showTitle('Positionnement', 'Centrez votre visage dans le cadre ovale avant de commencer');
 
     const container = document.createElement('div');
     container.style.cssText = `
@@ -905,7 +908,13 @@
       text-align: center; color: #eee;
     `;
 
-    // Miroir webcam
+    // ── Miroir webcam avec cadre ovale ────────────────────────────────────
+    const videoWrap = document.createElement('div');
+    videoWrap.style.cssText = `
+      position: relative; width: 320px; height: 240px;
+      margin: 0 auto 16px; display: inline-block;
+    `;
+
     const video = document.createElement('video');
     video.id = 'cal-mirror-video';
     video.autoplay = true;
@@ -915,10 +924,41 @@
       border-radius: 12px;
       border: 3px solid #4ecdc4;
       transform: scaleX(-1);
-      display: block; margin: 0 auto 16px;
+      display: block;
     `;
 
-    // Canvas caché pour analyse luminance
+    // Ovale cible — le visage doit tenir dedans pour valider la distance
+    // Dimensions calibrées pour ~60 cm de distance avec webcam standard.
+    const faceOval = document.createElement('div');
+    faceOval.id = 'cal-face-oval';
+    faceOval.style.cssText = `
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 120px; height: 160px;
+      border-radius: 50%;
+      border: 3px dashed #e74c3c;
+      pointer-events: none;
+      transition: border-color 0.3s, box-shadow 0.3s;
+      box-shadow: 0 0 0 0 rgba(231,76,60,0);
+    `;
+
+    // Label sous l'ovale
+    const ovalLabel = document.createElement('div');
+    ovalLabel.id = 'cal-oval-label';
+    ovalLabel.style.cssText = `
+      position: absolute; bottom: -24px; left: 50%;
+      transform: translateX(-50%);
+      font-size: 0.75rem; color: #e74c3c;
+      white-space: nowrap; pointer-events: none;
+    `;
+    ovalLabel.textContent = 'Alignez votre visage ici';
+
+    videoWrap.appendChild(video);
+    videoWrap.appendChild(faceOval);
+    videoWrap.appendChild(ovalLabel);
+
+    // Canvas caché pour analyse luminance + détection visage approx.
     const canvas = document.createElement('canvas');
     canvas.width = 80; canvas.height = 60;
     canvas.style.display = 'none';
@@ -926,76 +966,132 @@
     const statusBox = document.createElement('div');
     statusBox.style.cssText = `
       background: #16213e; border-radius: 10px;
-      padding: 14px 24px; margin-bottom: 16px;
-      font-size: 0.9rem; line-height: 2;
+      padding: 12px 20px; margin-bottom: 16px;
+      font-size: 0.88rem; line-height: 1.9;
+      min-width: 320px;
     `;
 
     const btnReady = document.createElement('button');
     btnReady.textContent = 'Je suis prêt — Démarrer la calibration';
     btnReady.style.cssText = _btnStyle('#4ecdc4') + 'color:#0f0f1a;font-weight:bold;';
+    // Désactivé tant que la distance n'est pas validée
+    btnReady.disabled = true;
+    btnReady.style.opacity = '0.45';
 
-    container.appendChild(video);
+    container.appendChild(videoWrap);
     container.appendChild(canvas);
     container.appendChild(statusBox);
     container.appendChild(btnReady);
     overlay.appendChild(container);
 
-    let stream = null;
-    let luminanceOk = true;
+    let stream       = null;
+    let luminanceOk  = false;
+    let distanceOk   = false;
 
-    function updateStatus(lum) {
+    // Seuils de luminance du centre du visage pour estimer la distance.
+    // Quand le visage est trop proche le centre sature (luminance centrale élevée),
+    // trop loin il est foncé. On utilise la zone centrale 30% comme proxy.
+    const DIST_BRIGHT_MIN = 80;   // trop sombre → trop loin ou mal éclairé
+    const DIST_BRIGHT_MAX = 210;  // trop brillant → trop près
+
+    function updateOval(ok) {
+      const color     = ok ? '#27ae60' : '#e74c3c';
+      const shadow    = ok ? '0 0 12px 4px rgba(39,174,96,0.45)' : '0 0 0 0 rgba(231,76,60,0)';
+      faceOval.style.borderColor = color;
+      faceOval.style.boxShadow   = shadow;
+      ovalLabel.style.color      = color;
+      ovalLabel.textContent      = ok
+        ? '✓ Distance correcte'
+        : 'Alignez votre visage ici';
+    }
+
+    function checkReadiness() {
+      const ready = luminanceOk && distanceOk;
+      btnReady.disabled     = !ready;
+      btnReady.style.opacity = ready ? '1' : '0.45';
+    }
+
+    function updateStatus(lum, centerLum) {
       let lumMsg, lumColor;
       if (lum < CONFIG.LUMINANCE_MIN) {
         lumMsg = '⚠️ Trop sombre — allumez une lumière devant vous';
-        lumColor = '#e74c3c';
-        luminanceOk = false;
+        lumColor = '#e74c3c'; luminanceOk = false;
       } else if (lum > CONFIG.LUMINANCE_MAX) {
         lumMsg = '⚠️ Trop lumineux — évitez la lumière directe dans le dos';
-        lumColor = '#e67e22';
-        luminanceOk = false;
+        lumColor = '#e67e22'; luminanceOk = false;
       } else {
         lumMsg = '✓ Luminosité correcte';
-        lumColor = '#27ae60';
-        luminanceOk = true;
+        lumColor = '#27ae60'; luminanceOk = true;
       }
+
+      // Estimation distance via luminance centrale
+      let distMsg, distColor;
+      if (centerLum < DIST_BRIGHT_MIN) {
+        distMsg = '↔️ Rapprochez-vous de l\'écran (~60 cm)';
+        distColor = '#e67e22'; distanceOk = false;
+      } else if (centerLum > DIST_BRIGHT_MAX) {
+        distMsg = '↔️ Éloignez-vous légèrement de l\'écran';
+        distColor = '#e67e22'; distanceOk = false;
+      } else {
+        distMsg = '✓ Distance correcte (~60 cm)';
+        distColor = '#27ae60'; distanceOk = true;
+      }
+
+      updateOval(distanceOk);
+      checkReadiness();
+
       statusBox.innerHTML = `
         <div style="color:${lumColor}">${lumMsg}</div>
-        <div style="color:#aaa;">📷 Assurez-vous d'être à ~60 cm de l'écran</div>
-        <div style="color:#aaa;">👤 Centrez votre visage dans le cadre</div>
+        <div style="color:${distColor}">${distMsg}</div>
+        <div style="color:#aaa;">👤 Centrez votre visage dans l'ovale</div>
+        <div style="color:#aaa;">📐 Ne bougez pas la tête pendant la calibration</div>
       `;
     }
 
-    // Démarrer le flux webcam pour le miroir
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
       navigator.mediaDevices.getUserMedia({ video: true }).then(s => {
         stream = s;
         video.srcObject = s;
 
-        // Analyse de luminance périodique
         const ctx = canvas.getContext('2d');
         const lumInterval = setInterval(() => {
           try {
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+
+            // Luminance globale
             let total = 0;
             for (let i = 0; i < data.length; i += 4) {
               total += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
             }
-            updateStatus(total / (canvas.width * canvas.height));
+            const globalLum = total / (canvas.width * canvas.height);
+
+            // Luminance zone centrale 30% (proxy distance)
+            const cx = Math.floor(canvas.width * 0.35);
+            const cy = Math.floor(canvas.height * 0.25);
+            const cw = Math.floor(canvas.width * 0.30);
+            const ch = Math.floor(canvas.height * 0.50);
+            const center = ctx.getImageData(cx, cy, cw, ch).data;
+            let cTotal = 0;
+            for (let i = 0; i < center.length; i += 4) {
+              cTotal += 0.299 * center[i] + 0.587 * center[i+1] + 0.114 * center[i+2];
+            }
+            const centerLum = cTotal / (cw * ch);
+
+            updateStatus(globalLum, centerLum);
           } catch (_) {}
-        }, 800);
+        }, 600);
         video._lumInterval = lumInterval;
       }).catch(() => {
         statusBox.innerHTML = '<div style="color:#e67e22">⚠️ Miroir webcam non disponible — continuez manuellement</div>';
-        luminanceOk = true; // ne pas bloquer si pas de permission
+        luminanceOk = true; distanceOk = true; checkReadiness();
       });
     } else {
       statusBox.innerHTML = '<div style="color:#aaa">Miroir non supporté — continuez manuellement</div>';
-      luminanceOk = true;
+      luminanceOk = true; distanceOk = true; checkReadiness();
     }
 
     btnReady.addEventListener('click', () => {
-      // Arrêter le flux miroir (WebGazer gère sa propre capture)
       if (stream) {
         stream.getTracks().forEach(t => t.stop());
         clearInterval(video._lumInterval);
@@ -1879,10 +1975,7 @@
   const Calibration = {
     start(onComplete) {
       onCompleteCallback = onComplete || null;
-      kalman.reset(); kalman2.reset(); oneEuro.reset();
-      emaX = null; emaY = null;
-      gazeWindowBuf = []; gazeRealTimeBuf = [];
-      lastOutX = null; lastOutY = null;
+      kalman.reset(); oneEuro.reset();
       implicitClicks = [];
 
       // Activer saveDataAcrossSessions et Kalman WebGazer natif
@@ -1895,18 +1988,20 @@
       loadBiasFromStorage();
 
       selectBestRegression(() => {
-        startGuidancePhase(() => {
-          startCalibrationPhase(null, () => {
-            showPhaseSplash(
-              'Phase 2 — Balle animée',
-              'Les points cliquables sont terminés. Maintenant, suivez la balle du regard sans bouger la tête ni cliquer.',
-              '🔵',
-              3000,
-              () => startAnimatedCalibrationPhase(() => {
-                createOverlay();
-                startValidationPhase(null, (score) => showScore(score));
-              })
-            );
+        startPreQuestionnairePhase(() => {
+          startGuidancePhase(() => {
+            startCalibrationPhase(null, () => {
+              showPhaseSplash(
+                'Phase 2 — Balle animée',
+                'Les points cliquables sont terminés. Maintenant, suivez la balle du regard sans bouger la tête ni cliquer.',
+                '🔵',
+                3000,
+                () => startAnimatedCalibrationPhase(() => {
+                  createOverlay();
+                  startValidationPhase(null, (score) => showScore(score));
+                })
+              );
+            });
           });
         });
       });
@@ -1914,10 +2009,7 @@
 
     startAnimated(onComplete) {
       onCompleteCallback = onComplete || null;
-      kalman.reset(); kalman2.reset(); oneEuro.reset();
-      emaX = null; emaY = null;
-      gazeWindowBuf = []; gazeRealTimeBuf = [];
-      lastOutX = null; lastOutY = null;
+      kalman.reset(); oneEuro.reset();
       implicitClicks = [];
 
       if (typeof webgazer !== 'undefined') {
@@ -1927,16 +2019,20 @@
 
       loadBiasFromStorage();
       selectBestRegression(() => {
-        startGuidancePhase(() => {
-          startAnimatedCalibrationPhase(() => {
-            createOverlay();
-            startValidationPhase(null, (score) => showScore(score));
+        startPreQuestionnairePhase(() => {
+          startGuidancePhase(() => {
+            startAnimatedCalibrationPhase(() => {
+              createOverlay();
+              startValidationPhase(null, (score) => showScore(score));
+            });
           });
         });
       });
     },
 
     getScore() { return lastScore; },
+
+    getSessionData() { return calibrationSession; },
 
     getStoredData() {
       try {
@@ -1953,12 +2049,7 @@
       idwNodes = [];
       implicitClicks = [];
       kalman.reset();
-      kalman2.reset();
       oneEuro.reset();
-      emaX = null; emaY = null;
-      gazeWindowBuf = [];
-      gazeRealTimeBuf = [];
-      lastOutX = null; lastOutY = null;
     },
 
     // Appliquer la correction de biais à une prédiction externe
@@ -1989,9 +2080,7 @@
     _oneEuro: OneEuroFilter,
     _internal: {
       startAnimatedCalibrationPhase,
-      get idwNodes()       { return idwNodes; },
-      get gazeWindowBuf()  { return gazeWindowBuf; },
-      get gazeRealTimeBuf(){ return gazeRealTimeBuf; },
+      get idwNodes() { return idwNodes; },
     },
   };
 
