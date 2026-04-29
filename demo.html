@@ -11,6 +11,7 @@
     onerror="document.getElementById('webcam-status').textContent='● WebGazer indisponible (hors ligne ?)'"
   ></script>
   <link rel="stylesheet" href="src/barchart/barchart.css" />
+  <link rel="stylesheet" href="src/linechart/linechart.css" />
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -41,7 +42,6 @@
 
     #webcam-status { font-size: 13px; color: #f0a500; }
 
-    /* ── Tabs ── */
     nav {
       background: #fff;
       border-bottom: 2px solid #dde;
@@ -167,7 +167,7 @@
       <div id="bar-chart-container" class="chart-wrapper"></div>
     </div>
     <div id="tab-linechart" class="tab-panel">
-      <div id="line-chart-container" class="placeholder">Line Chart — à intégrer (Dev 2)</div>
+      <div id="line-chart-container" class="chart-wrapper"></div>
     </div>
     <div id="tab-scatter"   class="tab-panel">
       <div id="scatter-chart-container" class="placeholder">Scatter Plot — à intégrer (Dev 3)</div>
@@ -202,6 +202,7 @@
 </div>
 
 <script src="src/barchart/barchart.js"></script>
+<script src="src/linechart/linechart.js"></script>
 <script>
   // ── Calibration score ────────────────────────────────────────────────────────
   (function () {
@@ -217,6 +218,9 @@
     } catch (_) {}
   })();
 
+  // ── Active chart reference ────────────────────────────────────────────────────
+  let _activeChart = BarChart;
+
   // ── Tab switching ────────────────────────────────────────────────────────────
   document.querySelectorAll('nav button').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -224,14 +228,28 @@
       document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
       btn.classList.add('active');
       document.getElementById(btn.dataset.tab).classList.add('active');
+
+      _resetDwell();
+
       if (btn.dataset.tab === 'tab-barchart') {
+        LineChart.setGazeMode(false);
         BarChart.init('bar-chart-container');
         if (_gazeModeOn) BarChart.setGazeMode(true);
+        _activeChart = BarChart;
+      } else if (btn.dataset.tab === 'tab-linechart') {
+        BarChart.setGazeMode(false);
+        LineChart.init('line-chart-container');
+        if (_gazeModeOn) LineChart.setGazeMode(true);
+        _activeChart = LineChart;
+      } else {
+        BarChart.setGazeMode(false);
+        LineChart.setGazeMode(false);
+        _activeChart = null;
       }
     });
   });
 
-  // ── Bar Chart ────────────────────────────────────────────────────────────────
+  // ── Initial render ────────────────────────────────────────────────────────────
   BarChart.init('bar-chart-container');
 
   // ── Gaze cursor elements ─────────────────────────────────────────────────────
@@ -246,55 +264,62 @@
   }
 
   // ── Dwell state machine ──────────────────────────────────────────────────────
-  const DWELL_MS  = 700;  // ms de regard pour déclencher le hover
-  const GRACE_MS  = 180;  // tolérance si le regard sort brièvement d'une barre
+  const DWELL_MS = 700;  // ms de regard pour déclencher le hover
+  const GRACE_MS = 180;  // tolérance si le regard sort brièvement d'une zone
 
   let _dwell = {
-    barId:      null,   // AOI id de la barre regardée
-    startedAt:  null,   // timestamp début dwell
-    hovering:   false,  // tooltip déjà affiché ?
-    graceTimer: null,   // timeout de grâce
+    aoiId:      null,   // id de la zone regardée
+    startedAt:  null,
+    hovering:   false,
+    graceTimer: null,
   };
 
-  function _onGazeBarEnter(barId) {
+  function _onGazeAOIEnter(aoiId) {
     if (_dwell.graceTimer) { clearTimeout(_dwell.graceTimer); _dwell.graceTimer = null; }
-    if (_dwell.barId === barId) return; // même barre, rien à faire
+    if (_dwell.aoiId === aoiId) return;
     _resetDwell();
-    _dwell.barId = barId;
+    _dwell.aoiId = aoiId;
     _dwell.startedAt = Date.now();
   }
 
-  function _onGazeBarLeave() {
-    if (!_dwell.barId) return;
-    _dwell.graceTimer = setTimeout(() => {
-      _resetDwell();
-    }, GRACE_MS);
+  function _onGazeAOILeave() {
+    if (!_dwell.aoiId) return;
+    _dwell.graceTimer = setTimeout(() => _resetDwell(), GRACE_MS);
   }
 
   function _resetDwell() {
     if (_dwell.graceTimer) { clearTimeout(_dwell.graceTimer); _dwell.graceTimer = null; }
-    if (_dwell.hovering) { BarChart.gazeLeave(); }
-    BarChart.gazeDwelling(null, 0);
+    if (_activeChart) {
+      if (_dwell.hovering) _activeChart.gazeLeave();
+      _activeChart.gazeDwelling(null, 0);
+    }
     _setDwellRing(0);
-    _dwell = { barId: null, startedAt: null, hovering: false, graceTimer: null };
+    _dwell = { aoiId: null, startedAt: null, hovering: false, graceTimer: null };
   }
 
   function _tickDwell(x, y) {
-    if (!_dwell.barId) return;
+    if (!_dwell.aoiId || !_activeChart) return;
     const elapsed  = Date.now() - _dwell.startedAt;
     const progress = Math.min(elapsed / DWELL_MS, 1);
     _setDwellRing(progress);
 
     if (!_dwell.hovering) {
-      BarChart.gazeDwelling(_dwell.barId, progress);
+      _activeChart.gazeDwelling(_dwell.aoiId, progress);
     }
     if (!_dwell.hovering && elapsed >= DWELL_MS) {
-      BarChart.gazeHover(_dwell.barId, x, y);
+      _activeChart.gazeHover(_dwell.aoiId, x, y);
       _dwell.hovering = true;
     } else if (_dwell.hovering) {
-      // Keep tooltip following gaze
-      BarChart.gazeHover(_dwell.barId, x, y);
+      _activeChart.gazeHover(_dwell.aoiId, x, y);
     }
+  }
+
+  // ── Interactive AOI prefixes per chart ───────────────────────────────────────
+  function _getInteractiveAOIs() {
+    if (!_activeChart) return [];
+    if (_activeChart === BarChart)   return BarChart.getAOIs().filter(a => a.id.startsWith('bar-'));
+    if (_activeChart === LineChart)  return LineChart.getAOIs().filter(a => a.id.startsWith('col-'));
+    return [];
   }
 
   // ── WebGazer setup ───────────────────────────────────────────────────────────
@@ -317,18 +342,16 @@
     const x = data.x - _biasX;
     const y = data.y - _biasY;
 
-    // Move cursor
     gazeCursor.style.left = x + 'px';
     gazeCursor.style.top  = y + 'px';
 
-    // Hit-test: only bar AOIs trigger dwell
-    const barAOIs = BarChart.getAOIs().filter(a => a.id.startsWith('bar-'));
-    const hit = barAOIs.find(a => x >= a.x && x <= a.x + a.width && y >= a.y && y <= a.y + a.height);
+    const aois = _getInteractiveAOIs();
+    const hit  = aois.find(a => x >= a.x && x <= a.x + a.width && y >= a.y && y <= a.y + a.height);
 
     if (hit) {
-      _onGazeBarEnter(hit.id);
+      _onGazeAOIEnter(hit.id);
     } else {
-      _onGazeBarLeave();
+      _onGazeAOILeave();
     }
     _tickDwell(x, y);
   }
@@ -352,7 +375,7 @@
       webgazer.setGazeListener(_gazeListener);
       gazeCursor.style.display = 'block';
       _gazeModeOn = true;
-      BarChart.setGazeMode(true);   // désactive le hover souris
+      if (_activeChart) _activeChart.setGazeMode(true);
 
       statusEl.textContent = '● Webcam active';
       statusEl.style.color = '#27ae60';
@@ -371,7 +394,8 @@
     gazeCursor.style.display = 'none';
     _resetDwell();
     _gazeModeOn = false;
-    BarChart.setGazeMode(false);   // réactive le hover souris
+    BarChart.setGazeMode(false);
+    LineChart.setGazeMode(false);
 
     statusEl.textContent = '● Webcam inactive';
     statusEl.style.color = '#f0a500';
@@ -387,7 +411,8 @@
 
   // ── AOI debug ────────────────────────────────────────────────────────────────
   document.getElementById('btn-aois').addEventListener('click', () => {
-    const aois = BarChart.getAOIs();
+    const chart = _activeChart || BarChart;
+    const aois  = chart.getAOIs();
     console.table(aois);
     alert(`${aois.length} AOI — voir console (F12).`);
   });

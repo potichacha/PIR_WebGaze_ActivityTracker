@@ -665,7 +665,8 @@
 
   function getFilteredPrediction() {
     if (typeof webgazer === 'undefined') return null;
-    const raw = webgazer.getCurrentPrediction();
+    let raw;
+    try { raw = webgazer.getCurrentPrediction(); } catch (_) { return null; }
     if (!raw || raw.x == null) return null;
 
     const now = Date.now();
