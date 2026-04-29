@@ -186,6 +186,91 @@
     return fixations;
   }
 
+  function detectSaccades(gazeData, velocityThreshold) {
+    if (!Array.isArray(gazeData) || gazeData.length === 0) return [];
+
+    const threshold = Number(velocityThreshold);
+    if (!Number.isFinite(threshold) || threshold < 0) return [];
+
+    const points = gazeData.filter(
+      p => p && Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.timestamp)
+    ).slice().sort((a, b) => a.timestamp - b.timestamp);
+
+    if (points.length < 2) return [];
+
+    const saccades = [];
+    let startIndex = -1;
+    let peakVelocity = 0;
+
+    function finalize(endIndex) {
+      if (startIndex < 0 || endIndex <= startIndex) return;
+      const start = points[startIndex];
+      const end = points[endIndex];
+      const duration = end.timestamp - start.timestamp;
+      if (duration <= 0) return;
+
+      saccades.push({
+        start_x: start.x,
+        start_y: start.y,
+        end_x: end.x,
+        end_y: end.y,
+        start_time: start.timestamp,
+        end_time: end.timestamp,
+        duration,
+        amplitude: distance(start.x, start.y, end.x, end.y),
+        peak_velocity: peakVelocity,
+      });
+    }
+
+    for (let index = 1; index < points.length; index++) {
+      const prev = points[index - 1];
+      const curr = points[index];
+      const dt = curr.timestamp - prev.timestamp;
+      if (dt <= 0) continue;
+
+      const velocity = distance(prev.x, prev.y, curr.x, curr.y) / dt;
+
+      if (velocity > threshold) {
+        if (startIndex < 0) startIndex = index - 1;
+        peakVelocity = Math.max(peakVelocity, velocity);
+      } else if (startIndex >= 0) {
+        finalize(index - 1);
+        startIndex = -1;
+        peakVelocity = 0;
+      }
+    }
+
+    if (startIndex >= 0) {
+      finalize(points.length - 1);
+    }
+
+    return saccades;
+  }
+
+  function linkEvents(fixations, saccades) {
+    const fixList = Array.isArray(fixations) ? fixations.slice().sort((a, b) => a.start_time - b.start_time) : [];
+    const sacList = Array.isArray(saccades) ? saccades.slice().sort((a, b) => a.start_time - b.start_time) : [];
+
+    const timeline = [];
+    let i = 0;
+    let j = 0;
+
+    while (i < fixList.length || j < sacList.length) {
+      const nextFix = fixList[i];
+      const nextSac = sacList[j];
+
+      if (!nextSac || (nextFix && nextFix.start_time <= nextSac.start_time)) {
+        timeline.push({ type: 'fixation', ...nextFix });
+        i++;
+      } else {
+        timeline.push({ type: 'saccade', ...nextSac });
+        j++;
+      }
+    }
+
+    return timeline;
+  }
+
   // ─── Stabilité du regard (pour le curseur personnalisé) ───────────────────
 
   function checkStability(stabilityQueue, point, maxWidth, maxHeight, requiredCount) {
@@ -225,13 +310,35 @@
     coords.innerHTML = `
       <div style="font-weight:bold;color:#4ecdc4;margin-bottom:4px;">Curseur WebGazer</div>
       <div id="cal-point-coords-text">—</div>
+      <div id="cal-saccade-status" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(78,205,196,0.25);color:#95a5a6;">Saccades: —</div>
     `;
     document.body.appendChild(coords);
+  }
+
+  function preventHomeTextSelection() {
+    if (typeof document === 'undefined') return;
+
+    document.addEventListener('dblclick', function (event) {
+      const home = document.getElementById('home-screen');
+      if (home && home.contains(event.target)) {
+        event.preventDefault();
+      }
+    }, true);
   }
 
   function updateGazeCursorCoords(x, y) {
     const el = typeof document !== 'undefined' && document.getElementById('cal-point-coords-text');
     if (el) el.textContent = `x : ${Math.round(x)}px · y : ${Math.round(y)}px`;
+  }
+
+  function updateSaccadeStatus(isSaccade) {
+    const el = typeof document !== 'undefined' && document.getElementById('cal-saccade-status');
+    if (el) {
+      const text = isSaccade ? 'oui' : 'non';
+      const color = isSaccade ? '#e74c3c' : '#95a5a6';
+      el.style.color = color;
+      el.textContent = `Saccades: ${text}`;
+    }
   }
 
   function setupCustomGazeCursor() {
@@ -242,12 +349,17 @@
     const cursorSize = 100;
     const gazeBuffer = [];
     const stabilityQueue = [];
+    let lastPoint = null;
+    const velocityThreshold = 0.7; // px/ms — seuil de saccade
 
     try {
       webgazer.setGazeListener((data) => {
         if (data == null || data.x == null) {
           if (cursor) cursor.style.display = 'none';
-          stabilityQueue.length = 0; return;
+          stabilityQueue.length = 0;
+          lastPoint = null;
+          updateSaccadeStatus(false);
+          return;
         }
         const now = Date.now();
         gazeBuffer.push({ x: data.x, y: data.y, timestamp: now });
@@ -256,6 +368,18 @@
         const avgX = gazeBuffer.reduce((s, p) => s + p.x, 0) / gazeBuffer.length;
         const avgY = gazeBuffer.reduce((s, p) => s + p.y, 0) / gazeBuffer.length;
         const stable = checkStability(stabilityQueue, { x: avgX, y: avgY }, 100, 80, 5);
+
+        // Détection de saccade basée sur la vélocité instantanée
+        let isSaccade = false;
+        if (lastPoint) {
+          const dt = now - lastPoint.timestamp;
+          if (dt > 0) {
+            const velocity = distance(lastPoint.x, lastPoint.y, avgX, avgY) / dt;
+            isSaccade = velocity > velocityThreshold;
+          }
+        }
+        lastPoint = { x: avgX, y: avgY, timestamp: now };
+        updateSaccadeStatus(isSaccade);
 
         if (!cursor) {
           cursor = document.createElement('div');
@@ -1629,12 +1753,14 @@
     getDriftScore,
 
     detectFixations,
+    detectSaccades,
+    linkEvents,
     setupCustomGazeCursor,
 
     CONFIG,
     CALIBRATION_GRID,
     VALIDATION_GRID,
-    _helpers: { distance, mean, stdDev, median, pxFromPct, removeOutliers, medianFilterPoints, getQuadrant, detectFixations, checkStability, applyIDWCorrection, applyLOWESS, computeIDWField, injectSyntheticCalibrationData },
+    _helpers: { distance, mean, stdDev, median, pxFromPct, removeOutliers, medianFilterPoints, getQuadrant, detectFixations, detectSaccades, linkEvents, checkStability, applyIDWCorrection, applyLOWESS, computeIDWField, injectSyntheticCalibrationData },
     _kalman: KalmanFilter,
     _internal: { startAnimatedCalibrationPhase, get idwNodes() { return idwNodes; } },
   };
@@ -1644,6 +1770,7 @@
   // Auto-setup curseur et panneau de coordonnées au chargement de la page
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     window.addEventListener('load', function () {
+      preventHomeTextSelection();
       createGazeCoordPanel();
       if (typeof webgazer !== 'undefined') {
         setTimeout(() => setupCustomGazeCursor(), 100);
