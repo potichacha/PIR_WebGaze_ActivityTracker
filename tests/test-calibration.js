@@ -41,7 +41,7 @@ global.document = {
 require('../src/calibration/calibration.js');
 
 const Cal = global.Calibration;
-const { distance, mean, stdDev, median, pxFromPct, removeOutliers, medianFilterPoints, getQuadrant, detectFixations, checkStability } = Cal._helpers;
+const { distance, mean, stdDev, median, pxFromPct, removeOutliers, medianFilterPoints, getQuadrant, detectFixations, detectSaccades, linkEvents, checkStability } = Cal._helpers;
 const { CONFIG, CALIBRATION_GRID, VALIDATION_GRID } = Cal;
 const KalmanFilter = Cal._kalman;
 
@@ -430,6 +430,15 @@ function generateScattered(width, height, count, startTimestamp, durationMs, rng
   }));
 }
 
+function generateLinearMotion(startX, startY, deltaX, deltaY, count, startTimestamp, durationMs) {
+  const step = count > 1 ? durationMs / (count - 1) : 0;
+  return Array.from({ length: count }, (_, i) => ({
+    x: startX + (deltaX * i) / Math.max(count - 1, 1),
+    y: startY + (deltaY * i) / Math.max(count - 1, 1),
+    timestamp: startTimestamp + i * step,
+  }));
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TEST 17 — I-DT : cluster concentré => 1 fixation
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -631,6 +640,88 @@ assert(minX <= 10, `Point le plus à gauche ≤ 10% (${minX}%) — bord bien cou
 assert(maxX >= 90, `Point le plus à droite ≥ 90% (${maxX}%) — bord bien couvert`);
 assert(minY <= 10, `Point le plus en haut ≤ 10% (${minY}%) — bord bien couvert`);
 assert(maxY >= 90, `Point le plus en bas ≥ 90% (${maxY}%) — bord bien couvert`);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST 21 — I-VT : saut brusque => 1 saccade
+// ═══════════════════════════════════════════════════════════════════════════════
+section('Test 29 : I-VT saut brusque (1 saccade attendue)');
+
+const jumpData = [
+  ...generateLinearMotion(400, 300, 0, 0, 5, 0, 80),
+  { x: 800, y: 600, timestamp: 110 },
+  ...generateLinearMotion(800, 600, 0, 0, 4, 140, 60),
+];
+const saccadesJump = detectSaccades(jumpData, 0.7);
+assert(saccadesJump.length === 1, `1 saccade détectée (actuel: ${saccadesJump.length})`);
+if (saccadesJump.length === 1) {
+  const s = saccadesJump[0];
+  assertApprox(s.start_x, 400, 0.01, 'start_x = 400');
+  assertApprox(s.start_y, 300, 0.01, 'start_y = 300');
+  assertApprox(s.end_x, 800, 0.01, 'end_x = 800');
+  assertApprox(s.end_y, 600, 0.01, 'end_y = 600');
+  assert(s.duration > 0, `duration > 0 (${s.duration}ms)`);
+  assertApprox(s.amplitude, 500, 1, 'amplitude ≈ 500px');
+  assert(s.peak_velocity > 0.7, `peak_velocity > seuil (${s.peak_velocity.toFixed(3)})`);
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST 22 — I-VT : mouvement lent => 0 saccade
+// ═══════════════════════════════════════════════════════════════════════════════
+section('Test 30 : I-VT mouvement lent (0 saccade attendue)');
+
+const slowData = generateLinearMotion(400, 300, 40, 0, 50, 0, 500);
+const saccadesSlow = detectSaccades(slowData, 0.7);
+assert(saccadesSlow.length === 0, `0 saccade détectée sur mouvement lent (actuel: ${saccadesSlow.length})`);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST 23 — linkEvents : alternance fixations / saccades
+// ═══════════════════════════════════════════════════════════════════════════════
+section('Test 31 : linkEvents alternance fixation/saccade');
+
+const fixationsTimeline = [
+  { start_time: 0,   end_time: 100, x_center: 100, y_center: 100, duration: 100, points_count: 10 },
+  { start_time: 220, end_time: 320, x_center: 300, y_center: 300, duration: 100, points_count: 10 },
+];
+const saccadesTimeline = [
+  { start_time: 110, end_time: 160, start_x: 100, start_y: 100, end_x: 200, end_y: 200, duration: 50, amplitude: 141.4, peak_velocity: 2.8 },
+  { start_time: 330, end_time: 360, start_x: 300, start_y: 300, end_x: 500, end_y: 500, duration: 30, amplitude: 282.8, peak_velocity: 9.4 },
+];
+const timeline = linkEvents(fixationsTimeline, saccadesTimeline);
+assert(timeline.length === 4, `timeline de 4 événements (actuel: ${timeline.length})`);
+assert(timeline.map(e => e.type).join(' > ') === 'fixation > saccade > fixation > saccade', 'Ordre alterné correct');
+assert(timeline[0].start_time <= timeline[1].start_time && timeline[1].start_time <= timeline[2].start_time,
+  'timeline triée par start_time');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST 24 — I-VT : seuil de vélocité configurable
+// ═══════════════════════════════════════════════════════════════════════════════
+section('Test 32 : I-VT seuil configurable');
+
+const mediumJump = [
+  ...generateLinearMotion(400, 300, 0, 0, 5, 0, 80),
+  { x: 520, y: 300, timestamp: 120 },
+  ...generateLinearMotion(520, 300, 0, 0, 4, 150, 60),
+];
+const lowThresholdCount = detectSaccades(mediumJump, 0.2).length;
+const highThresholdCount = detectSaccades(mediumJump, 3).length;
+assert(lowThresholdCount >= highThresholdCount, `seuil bas détecte au moins autant de saccades (${lowThresholdCount} >= ${highThresholdCount})`);
+assert(lowThresholdCount !== highThresholdCount, 'Changer le seuil modifie bien le résultat');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST 25 — I-VT : performance sur 10 000 points
+// ═══════════════════════════════════════════════════════════════════════════════
+section('Test 33 : I-VT performance (10 000 points)');
+
+const perfSaccData = Array.from({ length: 10000 }, (_, i) => ({
+  x: 400 + i * 0.05,
+  y: 300,
+  timestamp: i,
+}));
+const tS0 = Date.now();
+const perfSaccades = detectSaccades(perfSaccData, 0.7);
+const tS = Date.now() - tS0;
+assert(tS < 50, `detectSaccades < 50ms sur 10 000 points (${tS}ms)`);
+assert(Array.isArray(perfSaccades), 'detectSaccades retourne bien un tableau');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Résumé
