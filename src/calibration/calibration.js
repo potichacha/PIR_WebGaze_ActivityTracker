@@ -70,6 +70,41 @@
     // [E] LOWESS post-processing
     LOWESS_ENABLED:            true,
     LOWESS_BANDWIDTH:          0.45,  // fraction de points utilisés pour chaque prédiction locale
+    // ── Lissage temps réel ──────────────────────────────────────────────────
+    // Kalman retuné
+    KALMAN_Q:                  0.05,  // bruit processus (était 0.5) — moins de drift
+    KALMAN_R:                  200,   // bruit mesure   (était 50)  — plus de lissage
+    KALMAN_ADAPTIVE:           true,  // adapte R selon la vitesse du regard
+    KALMAN_ADAPTIVE_SCALE:     300,   // px/ms → contrib vitesse dans R adaptatif
+    // EMA pré-Kalman
+    EMA_ENABLED:               true,
+    EMA_ALPHA:                 0.35,  // 0 = aucun lissage, 1 = bloque tout
+    // Fenêtre glissante (moyenne)
+    WINDOW_ENABLED:            true,
+    WINDOW_SIZE:               5,     // frames (~165 ms à 30Hz)
+    // Filtre médian glissant
+    MEDIAN_ENABLED:            true,
+    MEDIAN_SIZE:               7,     // frames (impair recommandé)
+    // Zone morte
+    DEAD_ZONE_ENABLED:         true,
+    DEAD_ZONE_PX:              12,    // px — en dessous, le curseur ne bouge pas
+    // One Euro Filter
+    ONE_EURO_ENABLED:          true,
+    ONE_EURO_MIN_CUTOFF:       0.8,   // Hz — lissage au repos (plus bas = plus lisse)
+    ONE_EURO_BETA:             0.005, // réactivité aux mouvements rapides
+    ONE_EURO_D_CUTOFF:         1.0,   // Hz — coupure sur la dérivée
+    // Double Kalman (cascade)
+    DOUBLE_KALMAN_ENABLED:     true,
+    DOUBLE_KALMAN_Q:           0.02,
+    DOUBLE_KALMAN_R:           350,
+    // Snap-to-fixation I-DT temps réel
+    SNAP_FIXATION_ENABLED:     true,
+    SNAP_DISPERSION_PX:        60,    // px — seuil de dispersion pour déclarer une fixation
+    SNAP_DURATION_MS:          120,   // ms — durée minimum pour verrouiller
+    SNAP_BUFFER_MS:            300,   // ms — fenêtre temporelle du buffer temps réel
+    // Validation étendue
+    COLLECT_DURATION_MS_EXTENDED: 2000, // ms — collecte plus longue pour IDW précis
+    VALIDATION_POINTS_EXTENDED:   9,    // nœuds IDW supplémentaires
   };
 
   // ─── Grille de 25 points en % du viewport ──────────────────────────────────
@@ -279,20 +314,20 @@
   }
 
   // ─── Filtre de Kalman 4 états (x, y, vx, vy) ───────────────────────────────
-  function KalmanFilter() {
+  // Q et R configurables depuis CONFIG pour permettre le retuning sans toucher
+  // à la classe. KALMAN_ADAPTIVE module R selon la vitesse estimée du regard.
+  function KalmanFilter(Q, R) {
     this.x  = 0; this.y  = 0;
     this.vx = 0; this.vy = 0;
-    // Variances
     this.px  = 1000; this.py  = 1000;
     this.pvx = 100;  this.pvy = 100;
-    this.Q  = 0.5;   // bruit de processus
-    this.Rx = 50;    // bruit de mesure X
-    this.Ry = 50;    // bruit de mesure Y
+    this.Q  = (Q !== undefined) ? Q : CONFIG.KALMAN_Q;
+    this.R  = (R !== undefined) ? R : CONFIG.KALMAN_R;
     this.initialized = false;
   }
 
   KalmanFilter.prototype.update = function (mx, my, dt) {
-    dt = dt || 33; // ~30Hz
+    dt = dt || 33;
     if (!this.initialized) {
       this.x = mx; this.y = my;
       this.initialized = true;
@@ -305,9 +340,17 @@
     this.py  += this.Q;
     this.pvx += this.Q * 0.1;
     this.pvy += this.Q * 0.1;
+    // R adaptatif selon vitesse — lisse plus quand le regard est fixe
+    let Rx = this.R, Ry = this.R;
+    if (CONFIG.KALMAN_ADAPTIVE) {
+      const speed = Math.sqrt(this.vx * this.vx + this.vy * this.vy);
+      const extra = speed * CONFIG.KALMAN_ADAPTIVE_SCALE;
+      Rx = this.R + extra;
+      Ry = this.R + extra;
+    }
     // Gain de Kalman
-    const kx = this.px  / (this.px  + this.Rx);
-    const ky = this.py  / (this.py  + this.Ry);
+    const kx = this.px / (this.px + Rx);
+    const ky = this.py / (this.py + Ry);
     // Mise à jour
     const innX = mx - this.x;
     const innY = my - this.y;
@@ -327,13 +370,78 @@
     this.vx = 0; this.vy = 0;
   };
 
+  // ─── One Euro Filter ────────────────────────────────────────────────────────
+  // Filtre spécialisé pour le tracking temps réel : lisse fort au repos,
+  // laisse passer les mouvements rapides. Référence : Casiez et al. 2012.
+  function OneEuroFilter(minCutoff, beta, dCutoff) {
+    this.minCutoff = minCutoff || CONFIG.ONE_EURO_MIN_CUTOFF;
+    this.beta      = beta      || CONFIG.ONE_EURO_BETA;
+    this.dCutoff   = dCutoff   || CONFIG.ONE_EURO_D_CUTOFF;
+    this.xPrev  = null; this.yPrev  = null;
+    this.dxPrev = 0;    this.dyPrev = 0;
+    this.tPrev  = null;
+  }
+
+  OneEuroFilter.prototype._alpha = function (cutoff, dt) {
+    const tau = 1 / (2 * Math.PI * cutoff);
+    return 1 / (1 + tau / dt);
+  };
+
+  OneEuroFilter.prototype.filter = function (x, y, ts) {
+    if (this.xPrev === null) {
+      this.xPrev = x; this.yPrev = y; this.tPrev = ts;
+      return { x, y };
+    }
+    const dt = Math.max((ts - this.tPrev) / 1000, 1e-6); // secondes
+    this.tPrev = ts;
+
+    // Dérivée filtrée
+    const aD  = this._alpha(this.dCutoff, dt);
+    const dxRaw = (x - this.xPrev) / dt;
+    const dyRaw = (y - this.yPrev) / dt;
+    const dx = aD * dxRaw + (1 - aD) * this.dxPrev;
+    const dy = aD * dyRaw + (1 - aD) * this.dyPrev;
+    this.dxPrev = dx; this.dyPrev = dy;
+
+    // Fréquence de coupure adaptée à la vitesse
+    const speed   = Math.sqrt(dx * dx + dy * dy);
+    const cutoffX = this.minCutoff + this.beta * speed;
+    const cutoffY = this.minCutoff + this.beta * speed;
+
+    // Filtrage position
+    const aX = this._alpha(cutoffX, dt);
+    const aY = this._alpha(cutoffY, dt);
+    const fx = aX * x + (1 - aX) * this.xPrev;
+    const fy = aY * y + (1 - aY) * this.yPrev;
+    this.xPrev = fx; this.yPrev = fy;
+    return { x: fx, y: fy };
+  };
+
+  OneEuroFilter.prototype.reset = function () {
+    this.xPrev = null; this.yPrev = null;
+    this.dxPrev = 0;   this.dyPrev = 0;
+    this.tPrev  = null;
+  };
+
   // ─── État interne ──────────────────────────────────────────────────────────
   let overlay            = null;
   let currentPointIndex  = 0;
   let lastScore          = null;
   let onCompleteCallback = null;
   let kalman             = new KalmanFilter();
+  let kalman2            = new KalmanFilter(CONFIG.DOUBLE_KALMAN_Q, CONFIG.DOUBLE_KALMAN_R);
+  let oneEuro            = new OneEuroFilter();
   let lastPredTime       = 0;
+
+  // EMA pré-Kalman
+  let emaX = null, emaY = null;
+
+  // Buffer fenêtre glissante + médian
+  let gazeWindowBuf = [];   // [{x, y}] — partagé fenêtre ET médian
+  let gazeRealTimeBuf = []; // [{x, y, ts}] — pour snap-to-fixation
+
+  // Dernière sortie (zone morte)
+  let lastOutX = null, lastOutY = null;
 
   // Correction de biais
   let biasX = 0;
@@ -410,30 +518,133 @@
     return 'bottomRight';
   }
 
-  // ─── Obtenir une prédiction WebGazer filtrée ───────────────────────────────
+  // ─── Pipeline de lissage temps réel ───────────────────────────────────────
+  //
+  // Ordre des étapes :
+  //   raw WebGazer
+  //   → [1] EMA pré-Kalman
+  //   → [2] Fenêtre glissante (moyenne)
+  //   → [3] Filtre médian
+  //   → [4] Kalman adaptatif principal
+  //   → [5] One Euro Filter
+  //   → [6] Double Kalman (cascade)
+  //   → [7] Correction IDW + LOWESS
+  //   → [8] Zone morte
+  //   → [9] Snap-to-fixation I-DT temps réel
+
+  function _medianOf(arr) {
+    if (!arr.length) return 0;
+    const s = [...arr].sort((a, b) => a - b);
+    const m = Math.floor(s.length / 2);
+    return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+  }
+
   function getFilteredPrediction() {
     if (typeof webgazer === 'undefined') return null;
     const raw = webgazer.getCurrentPrediction();
     if (!raw || raw.x == null) return null;
+
     const now = Date.now();
     const dt  = lastPredTime ? now - lastPredTime : 33;
     lastPredTime = now;
-    const filtered = kalman.update(raw.x, raw.y, dt);
 
-    // [D] Correction IDW si des nœuds de validation existent
-    if (idwNodes.length > 0) {
-      // [E] LOWESS affine ensuite la correction IDW
-      const idw     = applyIDWCorrection(filtered.x, filtered.y);
-      const lowess  = applyLOWESS(idw.x, idw.y);
-      return lowess;
+    let x = raw.x, y = raw.y;
+
+    // ── [1] EMA pré-Kalman ────────────────────────────────────────────────
+    if (CONFIG.EMA_ENABLED) {
+      const a = CONFIG.EMA_ALPHA;
+      if (emaX === null) { emaX = x; emaY = y; }
+      emaX = a * x + (1 - a) * emaX;
+      emaY = a * y + (1 - a) * emaY;
+      x = emaX; y = emaY;
     }
 
-    // Fallback : biais global + quadrant (avant la première validation)
-    const q = getQuadrant(filtered.x, filtered.y);
-    return {
-      x: filtered.x - biasX - quadrantBias[q].x,
-      y: filtered.y - biasY - quadrantBias[q].y,
-    };
+    // ── [2] Fenêtre glissante (moyenne) ──────────────────────────────────
+    if (CONFIG.WINDOW_ENABLED) {
+      gazeWindowBuf.push({ x, y });
+      if (gazeWindowBuf.length > CONFIG.WINDOW_SIZE) gazeWindowBuf.shift();
+      x = gazeWindowBuf.reduce((s, p) => s + p.x, 0) / gazeWindowBuf.length;
+      y = gazeWindowBuf.reduce((s, p) => s + p.y, 0) / gazeWindowBuf.length;
+    }
+
+    // ── [3] Filtre médian glissant ────────────────────────────────────────
+    if (CONFIG.MEDIAN_ENABLED) {
+      // Réutilise le même buffer que la fenêtre si activé, sinon buffer dédié
+      const buf = CONFIG.WINDOW_ENABLED ? gazeWindowBuf : (() => {
+        gazeWindowBuf.push({ x, y });
+        if (gazeWindowBuf.length > CONFIG.MEDIAN_SIZE) gazeWindowBuf.shift();
+        return gazeWindowBuf;
+      })();
+      const sz = CONFIG.MEDIAN_SIZE;
+      const slice = buf.slice(-sz);
+      x = _medianOf(slice.map(p => p.x));
+      y = _medianOf(slice.map(p => p.y));
+    }
+
+    // ── [4] Kalman adaptatif principal ────────────────────────────────────
+    const k1 = kalman.update(x, y, dt);
+    x = k1.x; y = k1.y;
+
+    // ── [5] One Euro Filter ───────────────────────────────────────────────
+    if (CONFIG.ONE_EURO_ENABLED) {
+      const oe = oneEuro.filter(x, y, now);
+      x = oe.x; y = oe.y;
+    }
+
+    // ── [6] Double Kalman (cascade) ───────────────────────────────────────
+    if (CONFIG.DOUBLE_KALMAN_ENABLED) {
+      const k2 = kalman2.update(x, y, dt);
+      x = k2.x; y = k2.y;
+    }
+
+    // ── [7] Correction spatiale IDW + LOWESS ──────────────────────────────
+    if (idwNodes.length > 0) {
+      const idw    = applyIDWCorrection(x, y);
+      const lowess = applyLOWESS(idw.x, idw.y);
+      x = lowess.x; y = lowess.y;
+    } else {
+      // Fallback biais global + quadrant avant la première validation
+      const q = getQuadrant(x, y);
+      x = x - biasX - quadrantBias[q].x;
+      y = y - biasY - quadrantBias[q].y;
+    }
+
+    // ── [8] Zone morte ────────────────────────────────────────────────────
+    if (CONFIG.DEAD_ZONE_ENABLED && lastOutX !== null) {
+      const d = Math.sqrt((x - lastOutX) ** 2 + (y - lastOutY) ** 2);
+      if (d < CONFIG.DEAD_ZONE_PX) {
+        return { x: lastOutX, y: lastOutY };
+      }
+    }
+
+    // ── [9] Snap-to-fixation I-DT temps réel ─────────────────────────────
+    if (CONFIG.SNAP_FIXATION_ENABLED) {
+      gazeRealTimeBuf.push({ x, y, timestamp: now });
+      // Purger les points hors fenêtre temporelle
+      while (gazeRealTimeBuf.length &&
+             now - gazeRealTimeBuf[0].timestamp > CONFIG.SNAP_BUFFER_MS) {
+        gazeRealTimeBuf.shift();
+      }
+      if (gazeRealTimeBuf.length >= 2) {
+        const dur = gazeRealTimeBuf[gazeRealTimeBuf.length - 1].timestamp -
+                    gazeRealTimeBuf[0].timestamp;
+        if (dur >= CONFIG.SNAP_DURATION_MS) {
+          // Calculer la dispersion du buffer
+          const xs = gazeRealTimeBuf.map(p => p.x);
+          const ys = gazeRealTimeBuf.map(p => p.y);
+          const disp = (Math.max(...xs) - Math.min(...xs)) +
+                       (Math.max(...ys) - Math.min(...ys));
+          if (disp <= CONFIG.SNAP_DISPERSION_PX) {
+            // Fixation détectée — verrouiller sur le centroïde
+            x = xs.reduce((s, v) => s + v, 0) / xs.length;
+            y = ys.reduce((s, v) => s + v, 0) / ys.length;
+          }
+        }
+      }
+    }
+
+    lastOutX = x; lastOutY = y;
+    return { x, y };
   }
 
   // ─── Overlay ───────────────────────────────────────────────────────────────
@@ -1543,7 +1754,10 @@
   const Calibration = {
     start(onComplete) {
       onCompleteCallback = onComplete || null;
-      kalman.reset();
+      kalman.reset(); kalman2.reset(); oneEuro.reset();
+      emaX = null; emaY = null;
+      gazeWindowBuf = []; gazeRealTimeBuf = [];
+      lastOutX = null; lastOutY = null;
       implicitClicks = [];
 
       // Activer saveDataAcrossSessions et Kalman WebGazer natif
@@ -1575,7 +1789,10 @@
 
     startAnimated(onComplete) {
       onCompleteCallback = onComplete || null;
-      kalman.reset();
+      kalman.reset(); kalman2.reset(); oneEuro.reset();
+      emaX = null; emaY = null;
+      gazeWindowBuf = []; gazeRealTimeBuf = [];
+      lastOutX = null; lastOutY = null;
       implicitClicks = [];
 
       if (typeof webgazer !== 'undefined') {
@@ -1611,6 +1828,12 @@
       idwNodes = [];
       implicitClicks = [];
       kalman.reset();
+      kalman2.reset();
+      oneEuro.reset();
+      emaX = null; emaY = null;
+      gazeWindowBuf = [];
+      gazeRealTimeBuf = [];
+      lastOutX = null; lastOutY = null;
     },
 
     // Appliquer la correction de biais à une prédiction externe
@@ -1636,7 +1859,13 @@
     VALIDATION_GRID,
     _helpers: { distance, mean, stdDev, median, pxFromPct, removeOutliers, medianFilterPoints, getQuadrant, detectFixations, checkStability, applyIDWCorrection, applyLOWESS, computeIDWField, injectSyntheticCalibrationData },
     _kalman: KalmanFilter,
-    _internal: { startAnimatedCalibrationPhase, get idwNodes() { return idwNodes; } },
+    _oneEuro: OneEuroFilter,
+    _internal: {
+      startAnimatedCalibrationPhase,
+      get idwNodes()       { return idwNodes; },
+      get gazeWindowBuf()  { return gazeWindowBuf; },
+      get gazeRealTimeBuf(){ return gazeRealTimeBuf; },
+    },
   };
 
   global.Calibration = Calibration;
