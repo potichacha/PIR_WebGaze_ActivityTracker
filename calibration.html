@@ -11,8 +11,9 @@
     // innerWidth=1707 → décalage facteur DPR. On patch screen pour qu'il retourne les
     // dimensions CSS, cohérentes avec les coordonnées de clic et les prédictions.
     (function patchScreenForWebGazer() {
-      const dpr = window.devicePixelRatio || 1;
-      if (dpr === 1) return; // pas de zoom, rien à faire
+      // Patcher si screen.width != innerWidth (résolution physique != CSS)
+      // Cela arrive avec DPI scaling Windows ET avec certains multi-écrans
+      if (window.screen.width === window.innerWidth) return;
       try {
         Object.defineProperty(window, 'screen', {
           get: function () {

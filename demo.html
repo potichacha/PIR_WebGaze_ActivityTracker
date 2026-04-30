@@ -6,8 +6,7 @@
   <title>PIR WebGaze — Démo</title>
   <script>
     (function patchScreenForWebGazer() {
-      const dpr = window.devicePixelRatio || 1;
-      if (dpr === 1) return;
+      if (window.screen.width === window.innerWidth) return;
       try {
         Object.defineProperty(window, 'screen', {
           get: function () {
@@ -146,6 +145,30 @@
       color: #555;
     }
     #cal-score span { font-weight: bold; color: #27ae60; }
+
+    /* ── WebGazer video feed (coin bas-droite) ── */
+    #webgazerVideoContainer {
+      position: fixed !important;
+      bottom: 12px !important;
+      right: 12px !important;
+      top: auto !important;
+      left: auto !important;
+      width: 160px !important;
+      height: 120px !important;
+      border-radius: 8px;
+      overflow: hidden;
+      border: 2px solid rgba(78,205,196,0.6);
+      box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+      z-index: 9999;
+    }
+    #webgazerVideoFeed {
+      width: 160px !important;
+      height: 120px !important;
+    }
+    #webgazerFaceOverlay, #webgazerFaceFeedbackBox {
+      width: 160px !important;
+      height: 120px !important;
+    }
 
     /* ── Gaze cursor (dot + dwell ring) ── */
     #gaze-cursor {
@@ -349,12 +372,22 @@
 
   const statusEl = document.getElementById('webcam-status');
 
+  let _lastGaze = null;
+
   function _gazeListener(data) {
-    if (!data) return;
+    if (!data) {
+      // Pas de prédiction — garder la dernière position visible
+      if (_lastGaze) {
+        gazeCursor.style.left = _lastGaze.x + 'px';
+        gazeCursor.style.top  = _lastGaze.y + 'px';
+      }
+      return;
+    }
     const corrected = Calibration.applyBiasCorrection(data.x, data.y);
     const x = corrected.x;
     const y = corrected.y;
 
+    _lastGaze = { x, y };
     gazeCursor.style.left = x + 'px';
     gazeCursor.style.top  = y + 'px';
 
@@ -374,20 +407,22 @@
       Calibration.loadProfile();
 
       if (!_wgStarted) {
-        // saveDataAcrossSessions(true) AVANT begin() pour que WebGazer charge
-        // le modèle entraîné pendant la calibration depuis IndexedDB
         webgazer.saveDataAcrossSessions(true);
-        await webgazer.setRegression('ridge').setTracker('TFFaceMesh').begin();
+        // showVideo(true) AVANT begin() — FaceMesh a besoin du flux vidéo actif
+        webgazer.showVideo(true).showFaceOverlay(true).showFaceFeedbackBox(true);
+        await webgazer.setRegression('ridge').setTracker('TFFacemesh').begin();
         webgazer.applyKalmanFilter(true);
         webgazer.removeMouseEventListeners();
-        // Désactive le ré-entraînement sur les mouvements souris/clics
-        try { webgazer.params.imgWidth = 160; } catch (_) {}
-        webgazer.showVideo(true).showFaceOverlay(false).showFaceFeedbackBox(false);
         _wgStarted = true;
       } else {
         webgazer.resume();
+        webgazer.showVideo(true).showFaceOverlay(true).showFaceFeedbackBox(true);
         webgazer.removeMouseEventListeners();
       }
+
+      // Réinjecter les données d'entraînement depuis localStorage
+      // (IndexedDB via saveDataAcrossSessions n'est pas fiable entre pages)
+      Calibration.restoreTrainingData();
 
       webgazer.setGazeListener(_gazeListener);
       gazeCursor.style.display = 'block';

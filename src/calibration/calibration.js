@@ -50,11 +50,11 @@
     RECALIBRATION_THRESHOLD:   250,   // px : seuil global (réaliste pour webcam navigateur)
     QUADRANT_THRESHOLD:        280,   // px : seuil par quadrant
     VALIDATION_POINTS:         9,
-    VALIDATION_SETTLE_MS:      1200,  // ms : attente avant mesure
-    COLLECT_DURATION_MS:       2000,  // durée de collecte par point de validation
-    ROI_RADIUS:                200,
-    MIN_ROI_PERCENT:           60,
-    MIN_SAMPLES_PER_SEC:       15,
+    VALIDATION_SETTLE_MS:      1500,  // ms : attente avant mesure
+    COLLECT_DURATION_MS:       3000,  // durée de collecte — 3s pour avoir ~30 samples même à 10 Hz
+    ROI_RADIUS:                300,
+    MIN_ROI_PERCENT:           50,
+    MIN_SAMPLES_PER_SEC:       8,
     OUTLIER_SIGMA:             2,
     STORAGE_KEY:               'webgaze_calibration',
     DRIFT_WINDOW:              10,
@@ -2141,9 +2141,9 @@
     if (typeof webgazer.setTracker === 'function') {
       const originalSetTracker = webgazer.setTracker.bind(webgazer);
       webgazer.setTracker = function diagnosticSetTracker(name) {
-        debugLog(name === 'TFFaceMesh' ? 'info' : 'error', 'webgazer.setTracker called', {
+        debugLog(name === 'TFFacemesh' ? 'info' : 'error', 'webgazer.setTracker called', {
           name,
-          expected: 'TFFaceMesh',
+          expected: 'TFFacemesh',
           stack: new Error().stack,
         });
         return originalSetTracker(name);
@@ -2456,17 +2456,15 @@
     btnViz.addEventListener('click', () => showValidationVisualization(score));
     container.appendChild(btnViz);
 
-    // Bouton Continuer
-    if (!needsRecal) {
-      const btnOk = document.createElement('button');
-      btnOk.textContent = 'Continuer';
-      btnOk.style.cssText = _btnStyle('#27ae60');
-      btnOk.addEventListener('click', () => {
-        removeOverlay();
-        if (typeof onCompleteCallback === 'function') onCompleteCallback(score);
-      });
-      container.appendChild(btnOk);
-    }
+    // Bouton Continuer — toujours visible
+    const btnOk = document.createElement('button');
+    btnOk.textContent = needsRecal ? 'Continuer quand même →' : 'Continuer →';
+    btnOk.style.cssText = _btnStyle(needsRecal ? '#7f8c8d' : '#27ae60');
+    btnOk.addEventListener('click', () => {
+      removeOverlay();
+      if (typeof onCompleteCallback === 'function') onCompleteCallback(score);
+    });
+    container.appendChild(btnOk);
 
     // Bouton recalibration adaptative (zones faibles seulement)
     if (weakQuads.length > 0) {
@@ -2546,6 +2544,23 @@
     } catch (e) {
       console.warn('[Calibration] localStorage non disponible :', e);
     }
+
+    // Sauvegarder aussi les données d'entraînement WebGazer dans localStorage
+    // car IndexedDB (saveDataAcrossSessions) n'est pas fiable entre pages
+    try {
+      if (typeof webgazer !== 'undefined') {
+        const regs = webgazer.getRegression ? webgazer.getRegression() : null;
+        if (regs && regs[0] && regs[0].getData) {
+          const trainingData = regs[0].getData();
+          if (trainingData && trainingData.length > 0) {
+            localStorage.setItem('webgaze_training_data', JSON.stringify(trainingData));
+            debugLog('info', 'Training data saved to localStorage', { n: trainingData.length });
+          }
+        }
+      }
+    } catch (e) {
+      debugLog('warn', 'Could not save training data', { error: e && e.message });
+    }
   }
 
   function loadBiasFromStorage() {
@@ -2576,13 +2591,12 @@
 
       function _doStart() {
         loadBiasFromStorage();
-        selectBestRegression(() => {
-          startPreQuestionnairePhase(() => {
-            startGuidancePhase(() => {
-              startCalibrationPhase(null, () => {
-                createOverlay();
-                startValidationPhase(null, (score) => showScore(score));
-              });
+        tuneRegression(); // applique trailTime=0 et ridgeParameter sans re-begin
+        startPreQuestionnairePhase(() => {
+          startGuidancePhase(() => {
+            startCalibrationPhase(null, () => {
+              createOverlay();
+              startValidationPhase(null, (score) => showScore(score));
             });
           });
         });
@@ -2600,16 +2614,19 @@
       try { webgazer.removeMouseEventListeners(); } catch (_) {}
       try { webgazer.applyKalmanFilter(true); } catch (_) {}
 
-      const beginPromise = webgazer.setRegression('ridge').setTracker('TFFaceMesh').begin();
-      tuneRegression();
+      const beginPromise = webgazer.setRegression('ridge').setTracker('TFFacemesh').begin();
+
+      // Délai de 4s après begin() pour que TFLite et la webcam atteignent
+      // leur fréquence nominale avant de démarrer la calibration
+      const _delayedStart = () => setTimeout(_doStart, 4000);
 
       if (beginPromise && typeof beginPromise.then === 'function') {
-        beginPromise.then(_doStart).catch(err => {
+        beginPromise.then(_delayedStart).catch(err => {
           debugLog('error', 'webgazer.begin failed in Calibration.start', { message: err && err.message });
-          _doStart(); // tenter quand même
+          _delayedStart();
         });
       } else {
-        _doStart();
+        _delayedStart();
       }
     },
 
@@ -2663,6 +2680,32 @@
 
     // Charger le profil de calibration depuis localStorage (biais + IDW nodes)
     loadProfile() { loadBiasFromStorage(); },
+
+    // Réinjecter les données d'entraînement WebGazer depuis localStorage
+    restoreTrainingData() {
+      try {
+        const raw = localStorage.getItem('webgaze_training_data');
+        if (!raw) { debugLog('warn', 'No training data in localStorage'); return false; }
+        const trainingData = JSON.parse(raw);
+        if (!trainingData || !trainingData.length) { debugLog('warn', 'Training data empty'); return false; }
+        if (typeof webgazer === 'undefined') return false;
+        const regs = webgazer.getRegression ? webgazer.getRegression() : null;
+        if (!regs || !regs[0]) return false;
+        // Réinjecter chaque point d'entraînement
+        if (typeof regs[0].setData === 'function') {
+          regs[0].setData(trainingData);
+        } else {
+          trainingData.forEach(d => {
+            try { webgazer.recordScreenPosition(d.x, d.y, 'click'); } catch (_) {}
+          });
+        }
+        debugLog('info', 'Training data restored', { n: trainingData.length });
+        return true;
+      } catch (e) {
+        debugLog('warn', 'Could not restore training data', { error: e && e.message });
+        return false;
+      }
+    },
 
     // Appliquer la correction de biais à une prédiction externe
     applyBiasCorrection(x, y) {
