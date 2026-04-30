@@ -1,0 +1,41 @@
+.scatterchart-tooltip {
+  position: fixed;
+  background: rgba(28, 28, 28, 0.92);
+  color: #fff;
+  padding: 9px 13px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: Arial, sans-serif;
+  pointer-events: none;
+  white-space: nowrap;
+  z-index: 9999;
+  line-height: 1.7;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+}
+
+.scatter-title {
+  font-size: 14px;
+  font-weight: bold;
+  fill: #1a1a1a;
+  font-family: Arial, sans-serif;
+}
+
+.scatter-axis-label {
+  font-size: 12px;
+  fill: #666;
+  font-family: Arial, sans-serif;
+}
+
+.scatter-grid line {
+  stroke: #eaeaea;
+  stroke-dasharray: 4, 3;
+}
+.scatter-grid path { stroke-width: 0; }
+
+.scatter-x-axis path, .scatter-y-axis path { stroke: #bbb; }
+.scatter-x-axis line, .scatter-y-axis line { stroke: #bbb; }
+
+.scatter-label {
+  font-family: Arial, sans-serif;
+  pointer-events: none;
+}

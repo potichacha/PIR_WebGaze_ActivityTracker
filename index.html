@@ -34,6 +34,7 @@
 
   <link rel="stylesheet" href="src/barchart/barchart.css" />
   <link rel="stylesheet" href="src/linechart/linechart.css" />
+  <link rel="stylesheet" href="src/scatterchart/scatterchart.css" />
   <link rel="stylesheet" href="src/calibration/calibration.css" />
 
   <style>
@@ -480,6 +481,7 @@
 
     #demo-cal-score { margin-left: auto; font-size: 0.76rem; color: var(--muted); }
     #demo-cal-score span { font-weight: bold; }
+    #demo-session-stats { font-size: 0.76rem; color: var(--accent); font-weight: 600; }
 
     /* WebGazer video — coin bas-droite */
     #webgazerVideoContainer {
@@ -505,15 +507,6 @@
       display: none;
       z-index: 10000;
       transform: translate(-50%, -50%);
-    }
-    #gaze-dot {
-      position: absolute;
-      width: 14px; height: 14px;
-      background: rgba(231,76,60,0.8);
-      border: 2px solid rgba(255,255,255,0.95);
-      border-radius: 50%;
-      transform: translate(-50%, -50%);
-      box-shadow: 0 0 8px rgba(231,76,60,0.6);
     }
 
     /* ════════════════════════════════════════════════════
@@ -665,9 +658,7 @@
         <div id="line-chart-container" class="chart-wrapper"></div>
       </div>
       <div id="tab-scatter" class="tab-panel">
-        <div id="scatter-chart-container" class="placeholder">
-          Scatter Plot — à intégrer (Dev 3)
-        </div>
+        <div id="scatter-chart-container" class="chart-wrapper"></div>
       </div>
     </div>
 
@@ -675,7 +666,9 @@
       <button class="accent-btn" id="btn-demo-calibrate">↑ Calibrer</button>
       <button id="btn-demo-start">▶ Démarrer</button>
       <button id="btn-demo-stop" disabled>■ Arrêter</button>
+      <button id="btn-demo-export" disabled>⬇ Export JSON</button>
       <button id="btn-demo-aois">Afficher AOI</button>
+      <span id="demo-session-stats"></span>
       <span id="demo-cal-score"></span>
     </div>
 
@@ -684,16 +677,21 @@
 
 <!-- Gaze cursor -->
 <div id="gaze-cursor">
-  <svg id="dwell-svg" viewBox="-22 -22 44 44" width="44" height="44"
+  <svg id="dwell-svg" viewBox="-36 -36 72 72" width="72" height="72"
        style="position:absolute;transform:translate(-50%,-50%);">
-    <circle r="18" fill="none" stroke="rgba(255,255,255,0.22)" stroke-width="3"/>
-    <circle id="dwell-ring" r="18" fill="none"
-            stroke="#f39c12" stroke-width="3"
+    <!-- Contour principal du cercle loupe -->
+    <circle r="30" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2"/>
+    <!-- Halo extérieur subtil -->
+    <circle r="30" fill="none" stroke="rgba(78,205,196,0.3)" stroke-width="6"/>
+    <!-- Point central -->
+    <circle r="2.5" fill="rgba(255,255,255,0.95)"/>
+    <!-- Ring de progression dwell -->
+    <circle id="dwell-ring" r="30" fill="none"
+            stroke="#4ecdc4" stroke-width="3"
             stroke-linecap="round"
-            stroke-dasharray="0 113.1"
+            stroke-dasharray="0 188.5"
             transform="rotate(-90)"/>
   </svg>
-  <div id="gaze-dot"></div>
 </div>
 
 <!-- Scroll nav dots -->
@@ -707,6 +705,9 @@
 <script src="src/calibration/calibration.js?v=20260429-spa-01"></script>
 <script src="src/barchart/barchart.js"></script>
 <script src="src/linechart/linechart.js"></script>
+<script src="src/scatterchart/scatterchart.js"></script>
+<script src="src/logger/gaze-logger.js"></script>
+<script src="src/gaze-capture/gaze-capture.js"></script>
 
 <script>
 'use strict';
@@ -951,31 +952,31 @@ document.querySelectorAll('#demo-nav button').forEach(function (btn) {
     document.getElementById(btn.dataset.tab).classList.add('active');
 
     _resetDwell();
+    [BarChart, LineChart, ScatterChart].forEach(function (c) { c.setGazeMode(false); });
 
     if (btn.dataset.tab === 'tab-barchart') {
-      LineChart.setGazeMode(false);
       BarChart.init('bar-chart-container');
       if (_gazeModeOn) BarChart.setGazeMode(true);
       _activeChart = BarChart;
     } else if (btn.dataset.tab === 'tab-linechart') {
-      BarChart.setGazeMode(false);
       LineChart.init('line-chart-container');
       if (_gazeModeOn) LineChart.setGazeMode(true);
       _activeChart = LineChart;
     } else {
-      BarChart.setGazeMode(false);
-      LineChart.setGazeMode(false);
-      _activeChart = null;
+      ScatterChart.init('scatter-chart-container');
+      if (_gazeModeOn) ScatterChart.setGazeMode(true);
+      _activeChart = ScatterChart;
     }
   });
 });
 
 BarChart.init('bar-chart-container');
+ScatterChart.init('scatter-chart-container');
 
 // ── Gaze cursor elements ──────────────────────────────────────────────────────
 var gazeCursor = document.getElementById('gaze-cursor');
 var dwellRing  = document.getElementById('dwell-ring');
-var RING_CIRC  = 2 * Math.PI * 18;
+var RING_CIRC  = 2 * Math.PI * 30;
 
 function _setDwellRing(progress) {
   var filled = Math.min(progress, 1) * RING_CIRC;
@@ -1025,8 +1026,9 @@ function _tickDwell(x, y) {
 
 function _getInteractiveAOIs() {
   if (!_activeChart) return [];
-  if (_activeChart === BarChart)  return BarChart.getAOIs().filter(function (a) { return a.id.startsWith('bar-'); });
-  if (_activeChart === LineChart) return LineChart.getAOIs().filter(function (a) { return a.id.startsWith('col-'); });
+  if (_activeChart === BarChart)     return BarChart.getAOIs().filter(function (a) { return a.id.startsWith('bar-'); });
+  if (_activeChart === LineChart)    return LineChart.getAOIs().filter(function (a) { return a.id.startsWith('col-'); });
+  if (_activeChart === ScatterChart) return ScatterChart.getAOIs().filter(function (a) { return a.id.startsWith('point-'); });
   return [];
 }
 
@@ -1046,9 +1048,13 @@ function _gazeListener(data) {
   }
   var corrected = Calibration.applyBiasCorrection(data.x, data.y);
   var x = corrected.x, y = corrected.y;
+  var ts = Date.now();
   _lastGaze = { x: x, y: y };
   gazeCursor.style.left = x + 'px';
   gazeCursor.style.top  = y + 'px';
+
+  // Log point brut
+  if (GazeLogger.isInitialized()) GazeLogger.logRawPoint(x, y, ts);
 
   var aois = _getInteractiveAOIs();
   var hit  = aois.find(function (a) {
@@ -1060,11 +1066,20 @@ function _gazeListener(data) {
 
 async function _startGaze() {
   document.getElementById('btn-demo-start').disabled = true;
+  document.getElementById('btn-demo-export').disabled = true;
+  document.getElementById('demo-session-stats').textContent = '';
   _demoStatus.textContent = '● Chargement webcam…';
   _demoStatus.style.color = '#f0a500';
 
   try {
     Calibration.loadProfile();
+
+    // Initialiser le logger de session
+    var calStored = Calibration.getStoredData();
+    GazeLogger.init('participant', calStored ? {
+      mean_error_px: calStored.meanError,
+      std_error_px:  calStored.stdError || null,
+    } : null);
 
     if (!_wgStarted) {
       webgazer.saveDataAcrossSessions(false);
@@ -1107,16 +1122,68 @@ document.getElementById('btn-demo-stop').addEventListener('click', function () {
   gazeCursor.style.display = 'none';
   _resetDwell();
   _gazeModeOn = false;
-  BarChart.setGazeMode(false);
-  LineChart.setGazeMode(false);
+  [BarChart, LineChart, ScatterChart].forEach(function (c) { c.setGazeMode(false); });
   _demoStatus.textContent = '● Webcam inactive';
   _demoStatus.style.color = '#f0a500';
   document.getElementById('btn-demo-start').disabled = false;
   this.disabled = true;
+
+  // ── Post-traitement ────────────────────────────────────────────────────────
+  var rawData = GazeLogger.isInitialized() ? GazeLogger.export().raw_gaze_data : [];
+  if (rawData.length >= 10) {
+    var fixations = Calibration.detectFixations(rawData, 80, 100);
+    var saccades  = Calibration.detectSaccades(rawData, 0.7);
+
+    // Logger les événements
+    fixations.forEach(function (f) {
+      GazeLogger.logEvent({
+        type:       'fixation',
+        start_time: f.start_time,
+        end_time:   f.end_time,
+        duration:   f.duration,
+        details:    { x: f.x_center, y: f.y_center, points_count: f.points_count },
+      });
+    });
+    saccades.forEach(function (s) {
+      GazeLogger.logEvent({
+        type:       'saccade',
+        start_time: s.start_time,
+        end_time:   s.end_time,
+        duration:   s.duration,
+        details:    { start_x: s.start_x, start_y: s.start_y,
+                      end_x: s.end_x, end_y: s.end_y,
+                      amplitude: s.amplitude, peak_velocity: s.peak_velocity },
+      });
+    });
+
+    // Calculer AOI hits à partir des fixations
+    var allAOIs = [].concat(
+      BarChart.getAOIs(),
+      LineChart.getAOIs(),
+      ScatterChart.getAOIs()
+    );
+    fixations.forEach(function (f, idx) {
+      var hit = allAOIs.find(function (a) {
+        return f.x_center >= a.x && f.x_center <= a.x + a.width &&
+               f.y_center >= a.y && f.y_center <= a.y + a.height;
+      });
+      if (hit) GazeLogger.logAOIHit(hit.id, hit.label, idx, f.start_time);
+    });
+
+    var stats = GazeLogger.getStats();
+    document.getElementById('demo-session-stats').textContent =
+      stats.fixations + ' fix · ' + stats.saccades + ' sacc · ' + stats.aoiHits + ' AOI hits';
+  }
+
+  document.getElementById('btn-demo-export').disabled = false;
 });
 
 document.getElementById('btn-demo-calibrate').addEventListener('click', function () {
   scrollToSection('section-calibration');
+});
+
+document.getElementById('btn-demo-export').addEventListener('click', function () {
+  if (GazeLogger.isInitialized()) GazeLogger.download();
 });
 
 document.getElementById('btn-demo-aois').addEventListener('click', function () {
