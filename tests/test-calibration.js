@@ -41,7 +41,7 @@ global.document = {
 require('../src/calibration/calibration.js');
 
 const Cal = global.Calibration;
-const { distance, mean, stdDev, median, pxFromPct, removeOutliers, medianFilterPoints, getQuadrant, detectFixations, detectSaccades, linkEvents, checkStability } = Cal._helpers;
+const { distance, mean, stdDev, median, pxFromPct, getSafeScreenPoint, removeOutliers, medianFilterPoints, percentInROI, samplesPerSecond, summarizeValidationQuality, getQuadrant, detectFixations, detectSaccades, linkEvents, checkStability } = Cal._helpers;
 const { CONFIG, CALIBRATION_GRID, VALIDATION_GRID } = Cal;
 const KalmanFilter = Cal._kalman;
 
@@ -136,6 +136,13 @@ assert(pxFromPct(0, 1920) === 0,     'pxFromPct(0%, 1920) = 0');
 assert(pxFromPct(5, 1920) === 96,    'pxFromPct(5%, 1920) = 96 (bord extrême)');
 assert(pxFromPct(95, 1920) === 1824, 'pxFromPct(95%, 1920) = 1824 (bord extrême)');
 
+const safeTopLeft = getSafeScreenPoint({ xPct: 0, yPct: 0 });
+const safeBottomRight = getSafeScreenPoint({ xPct: 100, yPct: 100 });
+assert(safeTopLeft.x >= CONFIG.SAFE_MARGIN_X, 'Point safe gauche respecte la marge');
+assert(safeTopLeft.y >= CONFIG.SAFE_MARGIN_TOP, 'Point safe haut sous le titre');
+assert(safeBottomRight.x <= global.window.innerWidth - CONFIG.SAFE_MARGIN_X, 'Point safe droite respecte la marge');
+assert(safeBottomRight.y <= global.window.innerHeight - CONFIG.SAFE_MARGIN_BOTTOM, 'Point safe bas respecte la marge');
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // TEST 4 — Grille de 25 points
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -189,7 +196,7 @@ assert(q4 >= 4, `Quadrant bas-droite ≥ 4 points (${q4})`);
 // ═══════════════════════════════════════════════════════════════════════════════
 section('Test 5 : Grille de validation');
 
-assert(VALIDATION_GRID.length === 5, `5 points de validation (US-1.1)`);
+assert(VALIDATION_GRID.length === 9, `9 points de validation (recommandation jsPsych/WebGazer)`);
 
 const calSet = new Set(CALIBRATION_GRID.map(p => `${p.xPct},${p.yPct}`));
 const valUnique = VALIDATION_GRID.every(p => !calSet.has(`${p.xPct},${p.yPct}`));
@@ -232,6 +239,28 @@ assertApprox(medPts[0].y, 300, 10, 'Médiane Y ≈ 300');
 
 assert(medianFilterPoints([{ x: 5, y: 5 }]).length === 1, 'medianFilterPoints([1]) → 1 point');
 assert(medianFilterPoints([]).length === 0, 'medianFilterPoints([]) → []');
+
+section('Test 7b : Métriques qualité validation');
+
+const roiPts = [
+  { x: 100, y: 100 },
+  { x: 120, y: 100 },
+  { x: 500, y: 500 },
+  { x: 90, y: 90 },
+];
+assertApprox(percentInROI(roiPts, 100, 100, 50), 75, 0.001,
+  'percentInROI calcule le pourcentage dans le rayon');
+assertApprox(samplesPerSecond(40, 2000), 20, 0.001,
+  'samplesPerSecond(40, 2000ms) = 20Hz');
+
+const quality = summarizeValidationQuality([
+  { roiPercent: 80, samplesPerSec: 25 },
+  { roiPercent: 40, samplesPerSec: 12, noData: true },
+]);
+assertApprox(quality.meanRoiPercent, 60, 0.001, 'ROI moyenne = 60%');
+assert(quality.weakPoints.length === 1, 'Un point faible ROI détecté');
+assert(quality.lowSampleRate, 'Fréquence trop basse détectée');
+assert(quality.noDataPoints.length === 1, 'Point sans données détecté');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TEST 8 — getQuadrant
@@ -282,8 +311,8 @@ assert(afterJump.y < 700, 'Kalman atténue le saut brusque en Y');
 section('Test 10 : Configuration');
 
 assert(CONFIG.CLICKS_PER_POINT >= 3, `CLICKS_PER_POINT ≥ 3 (${CONFIG.CLICKS_PER_POINT})`);
-assert(CONFIG.RECALIBRATION_THRESHOLD === 150, 'Seuil global = 150 px');
-assert(CONFIG.VALIDATION_POINTS === 5, 'Points de validation = 5');
+assert(CONFIG.RECALIBRATION_THRESHOLD === 250, 'Seuil global = 250 px');
+assert(CONFIG.VALIDATION_POINTS === 9, 'Points de validation = 9');
 assert(CONFIG.MIN_CLICK_DELAY_MS > 0, `Délai minimum clic > 0 (${CONFIG.MIN_CLICK_DELAY_MS}ms)`);
 assert(CONFIG.OUTLIER_SIGMA === 2, 'Seuil outlier = 2σ');
 assert(CONFIG.COLLECT_DURATION_MS >= 1000, `Durée de collecte ≥ 1000ms (${CONFIG.COLLECT_DURATION_MS})`);
@@ -292,6 +321,13 @@ assert(CONFIG.DRIFT_THRESHOLD > 0, `Seuil dérive > 0 (${CONFIG.DRIFT_THRESHOLD}
 assert(typeof CONFIG.LUMINANCE_MIN === 'number', 'LUMINANCE_MIN défini');
 assert(typeof CONFIG.LUMINANCE_MAX === 'number', 'LUMINANCE_MAX défini');
 assert(CONFIG.LUMINANCE_MIN < CONFIG.LUMINANCE_MAX, 'LUMINANCE_MIN < LUMINANCE_MAX');
+assert(CONFIG.ROI_RADIUS > 0, `ROI_RADIUS > 0 (${CONFIG.ROI_RADIUS}px)`);
+assert(CONFIG.MIN_ROI_PERCENT > 0 && CONFIG.MIN_ROI_PERCENT <= 100,
+  `MIN_ROI_PERCENT dans ]0,100] (${CONFIG.MIN_ROI_PERCENT}%)`);
+assert(CONFIG.MIN_SAMPLES_PER_SEC > 0,
+  `MIN_SAMPLES_PER_SEC > 0 (${CONFIG.MIN_SAMPLES_PER_SEC}Hz)`);
+assert(CONFIG.LIGHT_BALANCE_MAX_DIFF > 0,
+  `LIGHT_BALANCE_MAX_DIFF > 0 (${CONFIG.LIGHT_BALANCE_MAX_DIFF})`);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TEST 11 — Logique du score de précision
@@ -302,8 +338,8 @@ const goodErrors = [50, 60, 55, 70, 65];
 assertApprox(mean(goodErrors), 60, 0.1, 'Bonne calibration : moyenne = 60 px');
 assert(mean(goodErrors) <= CONFIG.RECALIBRATION_THRESHOLD, 'Score correct ne déclenche pas recalibration');
 
-const badErrors = [200, 180, 220, 190, 210];
-assertApprox(mean(badErrors), 200, 0.1, 'Mauvaise calibration : moyenne = 200 px');
+const badErrors = [300, 280, 320, 290, 310];
+assertApprox(mean(badErrors), 300, 0.1, 'Mauvaise calibration : moyenne = 300 px');
 assert(mean(badErrors) > CONFIG.RECALIBRATION_THRESHOLD, 'Score insuffisant déclenche recalibration');
 
 const borderErrors = Array(5).fill(CONFIG.RECALIBRATION_THRESHOLD);
@@ -598,10 +634,14 @@ section('Test 26 : Mode calibration animée — API publique');
 
 assert(typeof Cal.startAnimated === 'function',
   'Calibration.startAnimated est une fonction');
+assert(typeof Cal.startMicroRecalibration === 'function',
+  'Calibration.startMicroRecalibration est une fonction');
 assert(typeof Cal._internal === 'object',
   'Calibration._internal exposé pour les tests');
 assert(typeof Cal._internal.startAnimatedCalibrationPhase === 'function',
   '_internal.startAnimatedCalibrationPhase est une fonction');
+assert(typeof Cal._internal.startMicroRecalibration === 'function',
+  '_internal.startMicroRecalibration est une fonction');
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // TEST 19 — Mode animé : temps total estimé

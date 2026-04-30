@@ -20,6 +20,15 @@
   let _callbacks = [];
   let _errorMsg  = null;
 
+  const CAMERA_CONSTRAINTS = {
+    video: {
+      width:     { min: 640, ideal: 1280, max: 1920 },
+      height:    { min: 480, ideal: 720,  max: 1080 },
+      frameRate: { ideal: 30, max: 60 },
+      facingMode: 'user'
+    }
+  };
+
   // ─── Helpers ───────────────────────────────────────────────────────────────
 
   function _setStatus(s) {
@@ -112,7 +121,7 @@
         return;
       }
       // Demande une permission minimale pour valider l'accès
-      navigator.mediaDevices.getUserMedia({ video: true })
+      navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS)
         .then(stream => {
           // Libérer immédiatement — WebGazer gère sa propre capture
           stream.getTracks().forEach(t => t.stop());
@@ -158,6 +167,8 @@
 
           // Désactiver le mouse-move comme source d'entraînement
           // (mouse-move pollue le modèle — issue #39 WebGazer)
+          try { webgazer.setCameraConstraints(CAMERA_CONSTRAINTS); } catch (_) {}
+          try { webgazer.setInternalVideoBufferSizes(640, 480); } catch (_) {}
           try { webgazer.removeMouseEventListeners(); } catch (_) {}
 
           webgazer.setGazeListener((data, elapsed) => {
