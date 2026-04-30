@@ -988,12 +988,14 @@ var DWELL_MS = 700;
 var GRACE_MS = 180;
 var _dwell   = { aoiId: null, startedAt: null, hovering: false, graceTimer: null };
 
-function _onGazeAOIEnter(aoiId) {
+function _onGazeAOIEnter(aoiId, x, y) {
   if (_dwell.graceTimer) { clearTimeout(_dwell.graceTimer); _dwell.graceTimer = null; }
   if (_dwell.aoiId === aoiId) return;
   _resetDwell();
   _dwell.aoiId = aoiId;
   _dwell.startedAt = Date.now();
+  // Tooltip immédiat dès l'entrée — comme un mouseover
+  if (_activeChart) _activeChart.gazeHover(aoiId, x, y);
 }
 
 function _onGazeAOILeave() {
@@ -1004,7 +1006,7 @@ function _onGazeAOILeave() {
 function _resetDwell() {
   if (_dwell.graceTimer) { clearTimeout(_dwell.graceTimer); _dwell.graceTimer = null; }
   if (_activeChart) {
-    if (_dwell.hovering) _activeChart.gazeLeave();
+    _activeChart.gazeLeave();
     _activeChart.gazeDwelling(null, 0);
   }
   _setDwellRing(0);
@@ -1016,13 +1018,9 @@ function _tickDwell(x, y) {
   var elapsed  = Date.now() - _dwell.startedAt;
   var progress = Math.min(elapsed / DWELL_MS, 1);
   _setDwellRing(progress);
-  if (!_dwell.hovering) _activeChart.gazeDwelling(_dwell.aoiId, progress);
-  if (!_dwell.hovering && elapsed >= DWELL_MS) {
-    _activeChart.gazeHover(_dwell.aoiId, x, y);
-    _dwell.hovering = true;
-  } else if (_dwell.hovering) {
-    _activeChart.gazeHover(_dwell.aoiId, x, y);
-  }
+  _activeChart.gazeDwelling(_dwell.aoiId, progress);
+  // Mise à jour continue de la position du tooltip pendant le dwell
+  _activeChart.gazeHover(_dwell.aoiId, x, y);
 }
 
 function _getInteractiveAOIs() {
@@ -1056,7 +1054,7 @@ function _gazeListener(data) {
   var hit  = aois.find(function (a) {
     return x >= a.x && x <= a.x + a.width && y >= a.y && y <= a.y + a.height;
   });
-  if (hit) _onGazeAOIEnter(hit.id); else _onGazeAOILeave();
+  if (hit) _onGazeAOIEnter(hit.id, x, y); else _onGazeAOILeave();
   _tickDwell(x, y);
 }
 
