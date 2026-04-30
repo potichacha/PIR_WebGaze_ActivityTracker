@@ -4,6 +4,26 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PIR WebGaze — Démo</title>
+  <script>
+    (function patchScreenForWebGazer() {
+      const dpr = window.devicePixelRatio || 1;
+      if (dpr === 1) return;
+      try {
+        Object.defineProperty(window, 'screen', {
+          get: function () {
+            return {
+              width:       window.innerWidth,
+              height:      window.innerHeight,
+              availWidth:  window.innerWidth,
+              availHeight: window.innerHeight,
+              colorDepth:  24,
+              pixelDepth:  24,
+            };
+          }
+        });
+      } catch (_) {}
+    })();
+  </script>
   <script src="https://d3js.org/d3.v7.min.js"></script>
   <script
     src="https://cdn.jsdelivr.net/npm/webgazer@2.1.0/dist/webgazer.min.js"
@@ -201,6 +221,7 @@
   <div id="gaze-dot"></div>
 </div>
 
+<script src="src/calibration/calibration.js"></script>
 <script src="src/barchart/barchart.js"></script>
 <script src="src/linechart/linechart.js"></script>
 <script>
@@ -209,7 +230,7 @@
     try {
       const stored = JSON.parse(localStorage.getItem('webgaze_calibration') || 'null');
       if (stored && stored.meanError != null) {
-        const ok = stored.meanError <= 150;
+        const ok = stored.meanError <= 250;
         document.getElementById('cal-score').innerHTML =
           `Dernière calibration : <span style="color:${ok ? '#27ae60' : '#e74c3c'}">${stored.meanError.toFixed(1)} px</span>`;
       } else {
@@ -325,51 +346,47 @@
   // ── WebGazer setup ───────────────────────────────────────────────────────────
   let _wgStarted  = false;
   let _gazeModeOn = false;
-  let _biasX = 0, _biasY = 0;
-
-  function _loadBias() {
-    try {
-      const s = JSON.parse(localStorage.getItem('webgaze_calibration') || 'null');
-      _biasX = (s && s.biasX) || 0;
-      _biasY = (s && s.biasY) || 0;
-    } catch (_) {}
-  }
 
   const statusEl = document.getElementById('webcam-status');
 
   function _gazeListener(data) {
     if (!data) return;
-    const x = data.x - _biasX;
-    const y = data.y - _biasY;
+    const corrected = Calibration.applyBiasCorrection(data.x, data.y);
+    const x = corrected.x;
+    const y = corrected.y;
 
     gazeCursor.style.left = x + 'px';
     gazeCursor.style.top  = y + 'px';
 
     const aois = _getInteractiveAOIs();
     const hit  = aois.find(a => x >= a.x && x <= a.x + a.width && y >= a.y && y <= a.y + a.height);
-
-    if (hit) {
-      _onGazeAOIEnter(hit.id);
-    } else {
-      _onGazeAOILeave();
-    }
+    if (hit) _onGazeAOIEnter(hit.id); else _onGazeAOILeave();
     _tickDwell(x, y);
   }
 
-  document.getElementById('btn-start').addEventListener('click', async function () {
-    this.disabled = true;
+  async function _startGaze() {
+    document.getElementById('btn-start').disabled = true;
     statusEl.textContent = '● Chargement webcam…';
     statusEl.style.color = '#f0a500';
-    _loadBias();
 
     try {
+      // Charger le profil de calibration (IDW nodes + biais) depuis localStorage
+      Calibration.loadProfile();
+
       if (!_wgStarted) {
+        // saveDataAcrossSessions(true) AVANT begin() pour que WebGazer charge
+        // le modèle entraîné pendant la calibration depuis IndexedDB
+        webgazer.saveDataAcrossSessions(true);
         await webgazer.setRegression('ridge').setTracker('TFFaceMesh').begin();
         webgazer.applyKalmanFilter(true);
+        webgazer.removeMouseEventListeners();
+        // Désactive le ré-entraînement sur les mouvements souris/clics
+        try { webgazer.params.imgWidth = 160; } catch (_) {}
         webgazer.showVideo(true).showFaceOverlay(false).showFaceFeedbackBox(false);
         _wgStarted = true;
       } else {
         webgazer.resume();
+        webgazer.removeMouseEventListeners();
       }
 
       webgazer.setGazeListener(_gazeListener);
@@ -384,9 +401,11 @@
     } catch (err) {
       statusEl.textContent = '● Erreur : ' + (err.message || err);
       statusEl.style.color = '#e74c3c';
-      this.disabled = false;
+      document.getElementById('btn-start').disabled = false;
     }
-  });
+  }
+
+  document.getElementById('btn-start').addEventListener('click', _startGaze);
 
   document.getElementById('btn-stop').addEventListener('click', function () {
     webgazer.clearGazeListener();
@@ -401,6 +420,15 @@
     statusEl.style.color = '#f0a500';
     document.getElementById('btn-start').disabled = false;
     this.disabled = true;
+  });
+
+  // Démarrage automatique si on vient de la calibration
+  window.addEventListener('load', function () {
+    if (typeof webgazer === 'undefined') return;
+    const stored = Calibration.getStoredData();
+    if (stored && stored.meanError != null) {
+      _startGaze();
+    }
   });
 
   // ── Calibrate shortcut ───────────────────────────────────────────────────────

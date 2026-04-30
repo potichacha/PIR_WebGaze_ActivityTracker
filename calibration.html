@@ -5,6 +5,30 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Calibration WebGazer — PIR Activity Tracker</title>
   <link rel="stylesheet" href="src/calibration/calibration.css" />
+  <script>
+    // WebGazer normalise les features d'entraînement avec window.screen.width/height
+    // (pixels physiques). Sur Windows avec zoom DPI (ex: 150%), screen.width=2560 mais
+    // innerWidth=1707 → décalage facteur DPR. On patch screen pour qu'il retourne les
+    // dimensions CSS, cohérentes avec les coordonnées de clic et les prédictions.
+    (function patchScreenForWebGazer() {
+      const dpr = window.devicePixelRatio || 1;
+      if (dpr === 1) return; // pas de zoom, rien à faire
+      try {
+        Object.defineProperty(window, 'screen', {
+          get: function () {
+            return {
+              width:       window.innerWidth,
+              height:      window.innerHeight,
+              availWidth:  window.innerWidth,
+              availHeight: window.innerHeight,
+              colorDepth:  24,
+              pixelDepth:  24,
+            };
+          }
+        });
+      } catch (_) {}
+    })();
+  </script>
 </head>
 <body>
 
@@ -12,16 +36,14 @@
   <h1>Calibration WebGazer</h1>
   <p>
     Ce module calibre le suivi du regard via votre webcam.<br>
-    La calibration se déroule en deux phases enchaînées :
-    d'abord <strong>25 points cliquables</strong> (5 clics chacun),
-    puis une <strong>balle animée</strong> à suivre du regard.
-    Enfin, <strong>5 points de validation</strong> mesurent la précision.
+    Cliquez sur chaque point <strong>10 fois</strong> (25 points au total),
+    puis <strong>9 points de validation</strong> mesurent la précision.
   </p>
 
   <div id="status-bar">
-    <div>Phase 1 — Points cliquables : <span>25 points × 5 clics</span></div>
-    <div>Phase 2 — Balle animée : <span>25 points (smooth pursuit)</span></div>
-    <div>Seuil d'acceptation : <span>≤ 150 px</span></div>
+    <div>Points cliquables : <span>25 points × 10 clics</span></div>
+    <div>Validation : <span>9 points, 1s de fixation puis 2s de mesure</span></div>
+    <div>Seuil d'acceptation : <span>≤ 250 px</span></div>
     <div>Dernière calibration : <span id="last-score-text">aucune</span></div>
     <div>Biais corrigé (X / Y) : <span id="bias-display">—</span></div>
   </div>
@@ -29,7 +51,7 @@
   <details id="improvements-panel">
     <summary>Améliorations actives vs version de base</summary>
     <ul>
-      <li>✓ 25 points (grille 5×5, bords extrêmes couverts)</li>
+      <li>✓ 25 points × 10 clics (grille 5×5, bords extrêmes couverts)</li>
       <li>✓ Ordre des points randomisé à chaque session</li>
       <li>✓ Filtre de Kalman 4 états (x, y, vx, vy)</li>
       <li>✓ Filtre Kalman natif WebGazer (<code>applyKalmanFilter(true)</code>)</li>
@@ -46,6 +68,12 @@
       <li>✓ Surveillance de dérive temporelle via clics implicites</li>
       <li>✓ Recalibration partielle (zones faibles uniquement)</li>
       <li>✓ Dot rouge temps réel suivant le regard pendant la calibration</li>
+      <li>✓ Webcam demandée en HD + buffer interne 640×480</li>
+      <li>✓ Validation 9 points avec délai de fixation avant collecte</li>
+      <li>✓ Score ROI par point + fréquence WebGazer minimale</li>
+      <li>✓ Carte visuelle des points de validation</li>
+      <li>✓ Micro-recalibration rapide en cas de dérive</li>
+      <li>✓ Vérification d'éclairage latéral avant calibration</li>
     </ul>
   </details>
 
@@ -61,6 +89,8 @@
     <table>
       <tr><td>Erreur moyenne</td><td id="sd-mean">—</td></tr>
       <tr><td>Écart-type</td>    <td id="sd-std">—</td></tr>
+      <tr><td>ROI moyenne/min</td><td id="sd-roi">—</td></tr>
+      <tr><td>Fréquence moy/min</td><td id="sd-hz">—</td></tr>
       <tr><td>Verdict</td>       <td id="sd-verdict">—</td></tr>
     </table>
     <div style="margin-top:12px;font-size:0.82rem;color:#4ecdc4;">Précision par quadrant</div>
@@ -87,7 +117,7 @@
   onerror="onWebGazerLoadError()"
 ></script>
 
-<script src="src/calibration/calibration.js"></script>
+<script src="src/calibration/calibration.js?v=20260429-debug-webgazer-01"></script>
 
 <script>
   // ── Gestion du statut WebGazer ────────────────────────────────────────────
@@ -103,18 +133,11 @@
     if (typeof webgazer !== 'undefined') {
       el.className = 'ready';
       document.getElementById('wg-status-text').textContent = 'WebGazer chargé et prêt.';
-
-      webgazer
-        .setRegression('ridge')
-        .setTracker('TFFaceMesh')
-        .begin()
-        .catch(err => {
-          el.className = 'error';
-          document.getElementById('wg-status-text').textContent =
-            'Erreur webcam : ' + err.message;
-        });
-
-      webgazer.showVideo(false).showFaceOverlay(false).showFaceFeedbackBox(false);
+      console.info('[Calibration HTML] loaded with local script v=20260429-debug-webgazer-01');
+      console.info('[Screen] screen.width=' + screen.width + ' screen.height=' + screen.height
+        + ' | innerWidth=' + window.innerWidth + ' innerHeight=' + window.innerHeight
+        + ' | devicePixelRatio=' + window.devicePixelRatio);
+      // WebGazer est démarré par Calibration.start() — ne pas appeler begin() ici
     } else {
       onWebGazerLoadError();
     }
@@ -135,9 +158,19 @@
 
   // ── Bouton Démarrer ───────────────────────────────────────────────────────
   document.getElementById('btn-start').addEventListener('click', function () {
-    Calibration.start(function onCalibrationComplete(score) {
+    Calibration.start(async function onCalibrationComplete(score) {
       renderScore(score);
       startDriftMonitor();
+      // Persiste le modèle WebGazer en IndexedDB avant navigation.
+      // On attend la résolution de end() pour garantir que la sauvegarde
+      // est complète avant que le navigateur quitte la page.
+      if (typeof webgazer !== 'undefined') {
+        try {
+          webgazer.saveDataAcrossSessions(true);
+          await webgazer.end();
+        } catch (_) {}
+      }
+      window.location.href = 'demo.html';
     });
   });
 
@@ -157,7 +190,10 @@
   // ── Bouton recalibration depuis alerte dérive ─────────────────────────────
   document.getElementById('btn-drift-recal').addEventListener('click', function () {
     document.getElementById('drift-indicator').style.display = 'none';
-    document.getElementById('btn-start').click();
+    Calibration.startMicroRecalibration(function onMicroRecalibrationComplete(score) {
+      renderScore(score);
+      startDriftMonitor();
+    });
   });
 
   // ── Rendu du score ────────────────────────────────────────────────────────
@@ -166,9 +202,29 @@
     sdDiv.style.display = 'block';
     document.getElementById('sd-mean').textContent    = score.meanError.toFixed(1) + ' px';
     document.getElementById('sd-std').textContent     = score.stdError.toFixed(1)  + ' px';
-    const ok = score.meanError <= Calibration.CONFIG.RECALIBRATION_THRESHOLD;
-    document.getElementById('sd-verdict').textContent = ok ? '✓ Réussie' : '✗ Insuffisante';
-    document.getElementById('sd-verdict').style.color = ok ? '#27ae60' : '#e74c3c';
+    const quality = score.quality || null;
+    if (quality) {
+      document.getElementById('sd-roi').textContent =
+        `${quality.meanRoiPercent.toFixed(0)}% / ${quality.minRoiPercent.toFixed(0)}%`;
+      document.getElementById('sd-hz').textContent =
+        `${quality.meanSamplesPerSec.toFixed(1)} / ${quality.minSamplesPerSec.toFixed(1)} Hz`;
+    }
+    const threshold = Calibration.CONFIG.RECALIBRATION_THRESHOLD;
+    const qualityOk = !quality || (
+      quality.minRoiPercent >= Calibration.CONFIG.MIN_ROI_PERCENT &&
+      quality.noDataPoints.length === 0 &&
+      !quality.lowSampleRate
+    );
+    const ok      = score.meanError <= threshold && qualityOk;
+    const isLimit = ok && score.meanError > threshold * 0.7;
+    const verdictText  = !ok      ? '✗ Insuffisante'
+                       : isLimit  ? '⚠️ Acceptable'
+                       :            '✓ Réussie';
+    const verdictColor = !ok      ? '#e74c3c'
+                       : isLimit  ? '#e67e22'
+                       :            '#27ae60';
+    document.getElementById('sd-verdict').textContent = verdictText;
+    document.getElementById('sd-verdict').style.color = verdictColor;
 
     document.getElementById('last-score-text').textContent =
       `${score.meanError.toFixed(1)} px`;

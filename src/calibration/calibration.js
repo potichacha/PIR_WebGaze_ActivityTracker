@@ -39,21 +39,32 @@
 
   // ─── Configuration ─────────────────────────────────────────────────────────
   const CONFIG = {
-    CLICKS_PER_POINT:          5,
-    MIN_CLICK_DELAY_MS:        800,   // délai minimum avant premier clic autorisé
-    RECALIBRATION_THRESHOLD:   150,   // px : seuil global
-    QUADRANT_THRESHOLD:        180,   // px : seuil par quadrant (plus tolérant)
-    VALIDATION_POINTS:         5,
-    COLLECT_DURATION_MS:       1200,  // durée de collecte par point de validation
-    OUTLIER_SIGMA:             2,     // supprimer prédictions hors N*σ
+    VERSION:                   '2026-04-29-debug-webgazer-01',
+    DEBUG_LOGGING:             true,
+    DEBUG_PANEL_VISIBLE:       false,
+    SAFE_MARGIN_X:             56,
+    SAFE_MARGIN_TOP:           120,
+    SAFE_MARGIN_BOTTOM:        72,
+    CLICKS_PER_POINT:          10,    // 10 clics par point → modèle ridge plus précis
+    MIN_CLICK_DELAY_MS:        800,   // délai avant 1er clic
+    RECALIBRATION_THRESHOLD:   250,   // px : seuil global (réaliste pour webcam navigateur)
+    QUADRANT_THRESHOLD:        280,   // px : seuil par quadrant
+    VALIDATION_POINTS:         9,
+    VALIDATION_SETTLE_MS:      1200,  // ms : attente avant mesure
+    COLLECT_DURATION_MS:       2000,  // durée de collecte par point de validation
+    ROI_RADIUS:                200,
+    MIN_ROI_PERCENT:           60,
+    MIN_SAMPLES_PER_SEC:       15,
+    OUTLIER_SIGMA:             2,
     STORAGE_KEY:               'webgaze_calibration',
-    DRIFT_WINDOW:              10,    // nombre de clics implicites pour estimer la dérive
-    DRIFT_THRESHOLD:           200,   // px : dérive > seuil → alerte
+    DRIFT_WINDOW:              10,
+    DRIFT_THRESHOLD:           300,   // px : dérive > seuil → alerte
     LUMINANCE_MIN:             40,    // luminance webcam minimale (0-255)
     LUMINANCE_MAX:             220,   // luminance webcam maximale
+    LIGHT_BALANCE_MAX_DIFF:    45,
     REGRESSION_MODELS:         ['ridge', 'weightedRidge'],
     ADAPTIVE_EXTRA_POINTS:     3,     // points supplémentaires par zone faible
-    ADAPTIVE_THRESHOLD:        160,   // px : erreur quadrant > seuil → zone faible
+    ADAPTIVE_THRESHOLD:        250,   // px : erreur quadrant > seuil → zone faible
     // Mode animé
     ANIMATED_STOP_MS:          900,   // durée d'arrêt sur chaque point (collecte WebGazer)
     ANIMATED_TRAVEL_MS:        700,   // durée de déplacement entre deux points
@@ -61,7 +72,7 @@
     ANIMATED_BALL_RADIUS:      18,    // rayon de la balle en px
     ANIMATED_TRAIL_LENGTH:     12,    // nombre de positions conservées pour le sillage
     // [B] Régularisation ridge renforcée
-    RIDGE_PARAMETER:           1e-2,  // défaut WebGazer : 1e-5 — on force la généralisation
+    RIDGE_PARAMETER:           5e-3,  // défaut WebGazer : 1e-5 — régularisation forte mais moins agressive qu'avant (250 pts réels)
     // [C] Augmentation de données synthétiques
     SYNTH_INTERPOLATION_STEPS: 2,     // points intermédiaires entre chaque paire de voisins
     SYNTH_ENABLED:             true,
@@ -84,7 +95,25 @@
     KALMAN_ADAPTIVE_SCALE:     300,
     // Validation étendue
     COLLECT_DURATION_MS_EXTENDED: 2000,
-    VALIDATION_POINTS_EXTENDED:   9
+    VALIDATION_POINTS_EXTENDED:   9,
+    CAMERA_CONSTRAINTS: {
+      video: {
+        width:      { min: 640, ideal: 1280, max: 1920 },
+        height:     { min: 480, ideal: 720,  max: 1080 },
+        frameRate:  { ideal: 30, max: 60 },
+        facingMode: 'user'
+      }
+    },
+    INTERNAL_VIDEO_WIDTH:      640,
+    INTERNAL_VIDEO_HEIGHT:     480,
+    MICRO_RECALIBRATION_POINTS: [
+      { xPct: 50, yPct: 50 },
+      { xPct: 20, yPct: 20 },
+      { xPct: 80, yPct: 20 },
+      { xPct: 20, yPct: 80 },
+      { xPct: 80, yPct: 80 },
+    ],
+    MICRO_RECALIBRATION_CLICKS: 2
   };
 
   // ─── Grille de 25 points en % du viewport ──────────────────────────────────
@@ -104,11 +133,9 @@
 
   // Points de validation intercalés (hors grille de calibration)
   const VALIDATION_GRID = [
-    { xPct: 16, yPct: 16 },
-    { xPct: 84, yPct: 16 },
-    { xPct: 50, yPct: 42 },
-    { xPct: 16, yPct: 84 },
-    { xPct: 84, yPct: 84 },
+    { xPct: 15, yPct: 15 }, { xPct: 50, yPct: 15 }, { xPct: 85, yPct: 15 },
+    { xPct: 15, yPct: 50 }, { xPct: 52, yPct: 52 }, { xPct: 85, yPct: 50 },
+    { xPct: 15, yPct: 85 }, { xPct: 50, yPct: 85 }, { xPct: 85, yPct: 85 },
   ];
 
   // ─── I-DT : détection de fixations (US-1.2) ───────────────────────────────
@@ -535,6 +562,68 @@
   let kalman             = new KalmanFilter();   // conservé pour l'API interne
   let oneEuro            = new OneEuroFilter();
   let lastPredTime       = 0;
+  let lastFilteredPrediction = null;
+  let pendingPredictionRequest = false;
+  let webgazerDiagnosticsInstalled = false;
+  let predictionStats = {
+    calls: 0,
+    syncValid: 0,
+    syncNull: 0,
+    promises: 0,
+    promiseResolved: 0,
+    promiseRejected: 0,
+    errors: 0,
+  };
+  const debugEvents = [];
+
+  function debugLog(level, message, data) {
+    if (!CONFIG.DEBUG_LOGGING) return;
+    const entry = {
+      ts: new Date().toISOString(),
+      level,
+      message,
+      data: data || null,
+    };
+    debugEvents.push(entry);
+    if (debugEvents.length > 300) debugEvents.shift();
+    const fn = console[level] || console.log;
+    try {
+      fn.call(console, `[Calibration ${CONFIG.VERSION}] ${message}`, data || '');
+    } catch (_) {}
+    if (typeof document !== 'undefined') updateDebugPanel(entry);
+  }
+
+  function updateDebugPanel(entry) {
+    let panel = document.getElementById('cal-debug-panel');
+    if (!panel) return;
+    const rows = debugEvents.slice(-8).map(e =>
+      `<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+        <span style="color:#4ecdc4;">${e.ts.slice(11, 19)}</span>
+        <span style="color:${e.level === 'error' ? '#e74c3c' : e.level === 'warn' ? '#f39c12' : '#ddd'};">${e.message}</span>
+      </div>`
+    ).join('');
+    panel.innerHTML = `
+      <div style="font-weight:bold;color:#4ecdc4;margin-bottom:4px;">Calibration debug ${CONFIG.VERSION}</div>
+      <div>pred: ${predictionStats.syncValid}/${predictionStats.calls} valid, promises ${predictionStats.promiseResolved}/${predictionStats.promises}, err ${predictionStats.errors}</div>
+      ${rows}
+    `;
+  }
+
+  function ensureDebugPanel() {
+    if (!CONFIG.DEBUG_LOGGING || !CONFIG.DEBUG_PANEL_VISIBLE || typeof document === 'undefined') return;
+    if (document.getElementById('cal-debug-panel')) return;
+    const panel = document.createElement('div');
+    panel.id = 'cal-debug-panel';
+    panel.style.cssText = `
+      position: fixed; left: 12px; bottom: 12px; z-index: 100005;
+      max-width: 480px; padding: 10px 12px; border-radius: 8px;
+      background: rgba(7,12,28,0.92); border: 1px solid rgba(78,205,196,0.45);
+      color: #ddd; font: 12px/1.45 Consolas, monospace; pointer-events: none;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.28);
+    `;
+    document.body.appendChild(panel);
+    updateDebugPanel();
+  }
 
   // Correction de biais
   let biasX = 0;
@@ -556,6 +645,23 @@
 
   function pxFromPct(pct, dimension) {
     return Math.round((pct / 100) * dimension);
+  }
+
+  function pxFromPctInRange(pct, min, max) {
+    return Math.round(min + (pct / 100) * (max - min));
+  }
+
+  function getSafeScreenPoint(point) {
+    const width = typeof window !== 'undefined' ? window.innerWidth : 1920;
+    const height = typeof window !== 'undefined' ? window.innerHeight : 1080;
+    const minX = Math.min(CONFIG.SAFE_MARGIN_X, Math.floor(width / 2));
+    const maxX = Math.max(minX, width - CONFIG.SAFE_MARGIN_X);
+    const minY = Math.min(CONFIG.SAFE_MARGIN_TOP, Math.floor(height / 2));
+    const maxY = Math.max(minY, height - CONFIG.SAFE_MARGIN_BOTTOM);
+    return {
+      x: pxFromPctInRange(point.xPct, minX, maxX),
+      y: pxFromPctInRange(point.yPct, minY, maxY),
+    };
   }
 
   function distance(x1, y1, x2, y2) {
@@ -586,6 +692,36 @@
     const xs = points.map(p => p.x);
     const ys = points.map(p => p.y);
     return [{ x: median(xs), y: median(ys) }];
+  }
+
+  function percentInROI(points, targetX, targetY, radius) {
+    if (!Array.isArray(points) || points.length === 0) return 0;
+    const inside = points.filter(p => distance(p.x, p.y, targetX, targetY) <= radius).length;
+    return (inside / points.length) * 100;
+  }
+
+  function samplesPerSecond(sampleCount, durationMs) {
+    if (!Number.isFinite(sampleCount) || !Number.isFinite(durationMs) || durationMs <= 0) return 0;
+    return sampleCount / (durationMs / 1000);
+  }
+
+  function summarizeValidationQuality(perPoint) {
+    const points = Array.isArray(perPoint) ? perPoint : [];
+    const roiPercents = points.map(p => p.roiPercent).filter(Number.isFinite);
+    const sampleRates = points.map(p => p.samplesPerSec).filter(Number.isFinite);
+    const weakPoints = points.filter(p =>
+      Number.isFinite(p.roiPercent) && p.roiPercent < CONFIG.MIN_ROI_PERCENT
+    );
+    const noDataPoints = points.filter(p => p.noData);
+    return {
+      meanRoiPercent: mean(roiPercents),
+      minRoiPercent: roiPercents.length ? Math.min(...roiPercents) : 100,
+      meanSamplesPerSec: mean(sampleRates),
+      minSamplesPerSec: sampleRates.length ? Math.min(...sampleRates) : Infinity,
+      weakPoints,
+      noDataPoints,
+      lowSampleRate: sampleRates.length ? Math.min(...sampleRates) < CONFIG.MIN_SAMPLES_PER_SEC : false,
+    };
   }
 
   // Supprimer les outliers au-delà de N*σ
@@ -625,12 +761,8 @@
   //   → [8] Zone morte
   //   → [9] Snap-to-fixation I-DT temps réel
 
-  function getFilteredPrediction() {
-    if (typeof webgazer === 'undefined') return null;
-    let raw;
-    try { raw = webgazer.getCurrentPrediction(); } catch (_) { return null; }
-    if (!raw || raw.x == null) return null;
-
+  function processRawPrediction(raw) {
+    if (!raw || raw.x == null || raw.y == null) return null;
     const now = Date.now();
     lastPredTime = now;
 
@@ -654,7 +786,44 @@
       y = y - biasY - quadrantBias[q].y;
     }
 
-    return { x, y };
+    lastFilteredPrediction = { x, y, timestamp: now };
+    return lastFilteredPrediction;
+  }
+
+  function getFilteredPrediction() {
+    if (typeof webgazer === 'undefined') return null;
+    predictionStats.calls++;
+    let raw;
+    try { raw = webgazer.getCurrentPrediction(); } catch (e) {
+      predictionStats.errors++;
+      debugLog('warn', 'getCurrentPrediction threw', { message: e && e.message });
+      return null;
+    }
+
+    if (raw && typeof raw.then === 'function') {
+      predictionStats.promises++;
+      if (!pendingPredictionRequest) {
+        pendingPredictionRequest = true;
+        raw.then(pred => {
+          pendingPredictionRequest = false;
+          predictionStats.promiseResolved++;
+          processRawPrediction(pred);
+        }).catch(() => {
+          pendingPredictionRequest = false;
+          predictionStats.promiseRejected++;
+        });
+      }
+      if (lastFilteredPrediction && Date.now() - lastFilteredPrediction.timestamp < 250) {
+        return lastFilteredPrediction;
+      }
+      predictionStats.syncNull++;
+      return null;
+    }
+
+    const processed = processRawPrediction(raw);
+    if (processed) predictionStats.syncValid++;
+    else predictionStats.syncNull++;
+    return processed;
   }
 
   // ─── Overlay ───────────────────────────────────────────────────────────────
@@ -721,6 +890,7 @@
     }
 
     document.body.appendChild(overlay);
+    ensureDebugPanel();
     return overlay;
   }
 
@@ -748,7 +918,12 @@
     overlay.appendChild(div);
   }
 
-  // Dot rouge qui suit le regard en temps réel pendant la calibration
+  // ─── Dot rouge gaze — branché directement sur le listener WebGazer ─────────
+  // On n'utilise PAS getFilteredPrediction() ici car getCurrentPrediction() peut
+  // retourner null entre frames. On s'abonne directement à setGazeListener pour
+  // avoir chaque frame dès qu'elle arrive.
+  let _gazeDotListener = null;
+
   function startGazeDot() {
     let dot = document.getElementById('cal-gaze-dot');
     if (!dot) {
@@ -757,24 +932,149 @@
       dot.className = 'cal-gaze-dot';
       document.body.appendChild(dot);
     }
-    const iv = setInterval(() => {
-      const pred = getFilteredPrediction();
-      if (pred) {
-        dot.style.left = pred.x + 'px';
-        dot.style.top  = pred.y + 'px';
-        dot.style.display = 'block';
-      }
-    }, 50);
-    dot._interval = iv;
+
+    if (typeof webgazer !== 'undefined') {
+      try {
+        _gazeDotListener = (data) => {
+          if (!data || data.x == null) return;
+          const filtered = processRawPrediction(data);
+          if (!filtered) return;
+          dot.style.left    = filtered.x + 'px';
+          dot.style.top     = filtered.y + 'px';
+          dot.style.display = 'block';
+        };
+        webgazer.setGazeListener(_gazeDotListener);
+      } catch (_) {}
+    }
     return dot;
   }
 
   function stopGazeDot() {
     const dot = document.getElementById('cal-gaze-dot');
-    if (dot) {
-      clearInterval(dot._interval);
-      dot.remove();
+    if (dot) dot.remove();
+    if (typeof webgazer !== 'undefined' && _gazeDotListener) {
+      try { webgazer.clearGazeListener(); } catch (_) {}
+      _gazeDotListener = null;
     }
+  }
+
+  // ─── Mini-miroir webcam persistant pendant la calibration ────────────────
+  // Positionné dans un coin, se déplace pour éviter le point actif.
+  let _calMirrorStream    = null;
+  let _calMirrorInterval  = null;
+
+  function startCalMirror() {
+    if (typeof document === 'undefined') return;
+    if (document.getElementById('cal-mirror-live')) return;
+
+    const wrap = document.createElement('div');
+    wrap.id = 'cal-mirror-live';
+    wrap.style.cssText = `
+      position: fixed; bottom: 16px; left: 16px;
+      z-index: 100002;
+      width: 160px;
+      border-radius: 12px;
+      overflow: hidden;
+      border: 2px solid #4ecdc4;
+      background: #0d1b2a;
+      pointer-events: none;
+      transition: left 0.4s ease, bottom 0.4s ease, right 0.4s ease;
+    `;
+
+    const vid = document.createElement('video');
+    vid.id = 'cal-mirror-live-video';
+    vid.autoplay = true;
+    vid.muted = true;
+    vid.style.cssText = `
+      width: 160px; height: 120px; display: block;
+      transform: scaleX(-1); object-fit: cover;
+    `;
+
+    // Ovale de distance
+    const oval = document.createElement('div');
+    oval.id = 'cal-mirror-live-oval';
+    oval.style.cssText = `
+      position: absolute; top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      width: 60px; height: 80px; border-radius: 50%;
+      border: 2px dashed #e74c3c;
+      pointer-events: none;
+      transition: border-color 0.3s;
+    `;
+
+    // Label distance
+    const lbl = document.createElement('div');
+    lbl.id = 'cal-mirror-live-lbl';
+    lbl.style.cssText = `
+      position: absolute; bottom: 4px; left: 0; right: 0;
+      text-align: center; font-size: 0.65rem; color: #e74c3c;
+      pointer-events: none;
+    `;
+    lbl.textContent = 'Distance ?';
+
+    wrap.appendChild(vid);
+    wrap.appendChild(oval);
+    wrap.appendChild(lbl);
+    document.body.appendChild(wrap);
+
+    if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+      navigator.mediaDevices.getUserMedia({ video: true }).then(s => {
+        _calMirrorStream = s;
+        vid.srcObject = s;
+
+        const canvas = document.createElement('canvas');
+        canvas.width = 40; canvas.height = 30;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        const DIST_BRIGHT_MIN = 80;
+        const DIST_BRIGHT_MAX = 210;
+
+        _calMirrorInterval = setInterval(() => {
+          try {
+            ctx.drawImage(vid, 0, 0, 40, 30);
+            const cx = 12, cy = 7, cw = 16, ch = 16;
+            const data = ctx.getImageData(cx, cy, cw, ch).data;
+            let t = 0;
+            for (let i = 0; i < data.length; i += 4) {
+              t += 0.299 * data[i] + 0.587 * data[i+1] + 0.114 * data[i+2];
+            }
+            const lum = t / (cw * ch);
+            const ok = lum >= DIST_BRIGHT_MIN && lum <= DIST_BRIGHT_MAX;
+            oval.style.borderColor = ok ? '#27ae60' : '#e74c3c';
+            lbl.style.color        = ok ? '#27ae60' : '#e74c3c';
+            lbl.textContent        = ok ? '✓ ~60 cm' : lum < DIST_BRIGHT_MIN ? '↔ Rapprochez-vous' : '↔ Éloignez-vous';
+          } catch (_) {}
+        }, 800);
+      }).catch(() => {});
+    }
+  }
+
+  function stopCalMirror() {
+    const wrap = document.getElementById('cal-mirror-live');
+    if (wrap) wrap.remove();
+    if (_calMirrorStream) {
+      _calMirrorStream.getTracks().forEach(t => t.stop());
+      _calMirrorStream = null;
+    }
+    if (_calMirrorInterval) {
+      clearInterval(_calMirrorInterval);
+      _calMirrorInterval = null;
+    }
+  }
+
+  // Déplace le miroir dans le coin opposé au point actif pour ne pas le couvrir
+  function updateCalMirrorPosition(pointX, pointY) {
+    const wrap = document.getElementById('cal-mirror-live');
+    if (!wrap) return;
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const isLeft   = pointX < W / 2;
+    const isBottom = pointY > H / 2;
+
+    // Choisir le coin le plus éloigné du point
+    wrap.style.left   = isLeft   ? 'auto' : '16px';
+    wrap.style.right  = isLeft   ? '16px' : 'auto';
+    wrap.style.bottom = isBottom ? 'auto' : '16px';
+    wrap.style.top    = isBottom ? '16px' : 'auto';
   }
 
   // ─── PHASE -1 : Questionnaire pré-calibration ────────────────────────────
@@ -900,6 +1200,9 @@
   function startGuidancePhase(onReady) {
     createOverlay();
     showTitle('Positionnement', 'Centrez votre visage dans le cadre ovale avant de commencer');
+    if (typeof webgazer !== 'undefined') {
+      try { webgazer.showFaceFeedbackBox(true); } catch (_) {}
+    }
 
     const container = document.createElement('div');
     container.style.cssText = `
@@ -986,6 +1289,7 @@
 
     let stream       = null;
     let luminanceOk  = false;
+    let lightBalanceOk = false;
     let distanceOk   = false;
 
     // Seuils de luminance du centre du visage pour estimer la distance.
@@ -1006,12 +1310,12 @@
     }
 
     function checkReadiness() {
-      const ready = luminanceOk && distanceOk;
+      const ready = luminanceOk && lightBalanceOk && distanceOk;
       btnReady.disabled     = !ready;
       btnReady.style.opacity = ready ? '1' : '0.45';
     }
 
-    function updateStatus(lum, centerLum) {
+    function updateStatus(lum, centerLum, balanceDiff) {
       let lumMsg, lumColor;
       if (lum < CONFIG.LUMINANCE_MIN) {
         lumMsg = '⚠️ Trop sombre — allumez une lumière devant vous';
@@ -1022,6 +1326,15 @@
       } else {
         lumMsg = '✓ Luminosité correcte';
         lumColor = '#27ae60'; luminanceOk = true;
+      }
+
+      let balanceMsg, balanceColor;
+      if (balanceDiff > CONFIG.LIGHT_BALANCE_MAX_DIFF) {
+        balanceMsg = '⚠️ Lumière trop latérale — éclairez plutôt depuis l’écran';
+        balanceColor = '#e67e22'; lightBalanceOk = false;
+      } else {
+        balanceMsg = '✓ Lumière équilibrée sur le visage';
+        balanceColor = '#27ae60'; lightBalanceOk = true;
       }
 
       // Estimation distance via luminance centrale
@@ -1042,6 +1355,7 @@
 
       statusBox.innerHTML = `
         <div style="color:${lumColor}">${lumMsg}</div>
+        <div style="color:${balanceColor}">${balanceMsg}</div>
         <div style="color:${distColor}">${distMsg}</div>
         <div style="color:#aaa;">👤 Centrez votre visage dans l'ovale</div>
         <div style="color:#aaa;">📐 Ne bougez pas la tête pendant la calibration</div>
@@ -1049,11 +1363,11 @@
     }
 
     if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-      navigator.mediaDevices.getUserMedia({ video: true }).then(s => {
+      navigator.mediaDevices.getUserMedia(cloneCameraConstraints()).then(s => {
         stream = s;
         video.srcObject = s;
 
-        const ctx = canvas.getContext('2d');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
         const lumInterval = setInterval(() => {
           try {
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -1077,24 +1391,39 @@
               cTotal += 0.299 * center[i] + 0.587 * center[i+1] + 0.114 * center[i+2];
             }
             const centerLum = cTotal / (cw * ch);
+            const left = ctx.getImageData(0, 0, Math.floor(canvas.width / 2), canvas.height).data;
+            const right = ctx.getImageData(Math.floor(canvas.width / 2), 0, Math.floor(canvas.width / 2), canvas.height).data;
+            let leftTotal = 0, rightTotal = 0;
+            for (let i = 0; i < left.length; i += 4) {
+              leftTotal += 0.299 * left[i] + 0.587 * left[i+1] + 0.114 * left[i+2];
+            }
+            for (let i = 0; i < right.length; i += 4) {
+              rightTotal += 0.299 * right[i] + 0.587 * right[i+1] + 0.114 * right[i+2];
+            }
+            const balanceDiff = Math.abs(
+              (leftTotal / (left.length / 4)) - (rightTotal / (right.length / 4))
+            );
 
-            updateStatus(globalLum, centerLum);
+            updateStatus(globalLum, centerLum, balanceDiff);
           } catch (_) {}
         }, 600);
         video._lumInterval = lumInterval;
       }).catch(() => {
         statusBox.innerHTML = '<div style="color:#e67e22">⚠️ Miroir webcam non disponible — continuez manuellement</div>';
-        luminanceOk = true; distanceOk = true; checkReadiness();
+        luminanceOk = true; lightBalanceOk = true; distanceOk = true; checkReadiness();
       });
     } else {
       statusBox.innerHTML = '<div style="color:#aaa">Miroir non supporté — continuez manuellement</div>';
-      luminanceOk = true; distanceOk = true; checkReadiness();
+      luminanceOk = true; lightBalanceOk = true; distanceOk = true; checkReadiness();
     }
 
     btnReady.addEventListener('click', () => {
       if (stream) {
         stream.getTracks().forEach(t => t.stop());
         clearInterval(video._lumInterval);
+      }
+      if (typeof webgazer !== 'undefined') {
+        try { webgazer.showFaceFeedbackBox(false); } catch (_) {}
       }
       removeOverlay();
       onReady();
@@ -1114,8 +1443,9 @@
       .map(o => o.p);
 
     currentPointIndex = 0;
-    showTitle('Phase 1 — Points cliquables', `Cliquez ${CONFIG.CLICKS_PER_POINT} fois sur chaque point — ${shuffled.length} points au total`);
+    showTitle('Calibration', `Fixez chaque point et cliquez dessus ${CONFIG.CLICKS_PER_POINT} fois — ${shuffled.length} points au total`);
     startGazeDot();
+    startCalMirror();
 
     function showNext(index) {
       const old = overlay.querySelector('.cal-point-wrapper');
@@ -1123,7 +1453,7 @@
 
       if (index >= shuffled.length) {
         stopGazeDot();
-        // [C] Injecter des points synthétiques entre voisins de grille
+        stopCalMirror();
         injectSyntheticCalibrationData(CALIBRATION_GRID);
         if (typeof onDone === 'function') onDone();
         else startValidationPhase(null, null);
@@ -1131,8 +1461,9 @@
       }
 
       const { xPct, yPct } = shuffled[index];
-      const x = pxFromPct(xPct, window.innerWidth);
-      const y = pxFromPct(yPct, window.innerHeight);
+      const { x, y } = getSafeScreenPoint({ xPct, yPct });
+
+      updateCalMirrorPosition(x, y);
 
       showTitle(
         `Calibration — ${index + 1} / ${shuffled.length}`,
@@ -1210,6 +1541,7 @@
           setTimeout(() => { point.style.animation = ''; }, 200);
         }
 
+        recordCalibrationPoint(x, y);
         clicksOnPoint++;
         counter.textContent = `${clicksOnPoint}/${CONFIG.CLICKS_PER_POINT}`;
 
@@ -1321,10 +1653,12 @@
       width: 100%; height: 100%;
       pointer-events: none;
     `;
-    canvas.width  = window.innerWidth;
-    canvas.height = window.innerHeight;
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width  = window.innerWidth  * dpr;
+    canvas.height = window.innerHeight * dpr;
     overlay.appendChild(canvas);
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.scale(dpr, dpr);
 
     // Balle principale
     const ball = document.createElement('div');
@@ -1409,8 +1743,9 @@
     let currentIdx = 0;
     // Positionner la balle sur le premier point sans transition
     const first = shuffled[0];
-    const fx = pxFromPct(first.xPct, window.innerWidth);
-    const fy = pxFromPct(first.yPct, window.innerHeight);
+    const firstPoint = getSafeScreenPoint(first);
+    const fx = firstPoint.x;
+    const fy = firstPoint.y;
     ball.style.transition = 'none';
     svgRing.style.transition = 'none';
     placeBall(fx, fy);
@@ -1423,24 +1758,22 @@
 
     function visitPoint(idx) {
       if (idx >= shuffled.length) {
-        // Fin — nettoyer et passer à la validation
         ctx.clearRect(0, 0, canvas.width, canvas.height);
         stopGazeDot();
-        // [C] Injecter des points synthétiques entre voisins de grille
+        stopCalMirror();
         injectSyntheticCalibrationData(CALIBRATION_GRID);
         if (typeof onDone === 'function') onDone();
         return;
       }
 
       const { xPct, yPct } = shuffled[idx];
-      const x = pxFromPct(xPct, window.innerWidth);
-      const y = pxFromPct(yPct, window.innerHeight);
+      const { x, y } = getSafeScreenPoint({ xPct, yPct });
 
-      // Mise à jour progression
+      updateCalMirrorPosition(x, y);
+
       progressBar.style.width = ((idx / shuffled.length) * 100) + '%';
       counter.textContent = `Point ${idx + 1} / ${shuffled.length}`;
 
-      // Déplacer la balle (transition CSS)
       placeBall(x, y);
 
       // Ajouter au sillage
@@ -1464,7 +1797,7 @@
           if (collectCount > maxCollects) { clearInterval(collectIv); return; }
 
           if (typeof webgazer !== 'undefined') {
-            try { webgazer.recordScreenPosition(x, y, 'click'); } catch (_) {}
+            recordCalibrationPoint(x, y);
           }
 
           // Aussi alimenter la dérive
@@ -1478,10 +1811,9 @@
       }, CONFIG.ANIMATED_TRAVEL_MS);
     }
 
-    // Démarrer le dot regard temps réel
     startGazeDot();
+    startCalMirror();
 
-    // Démarrer la visite après un court délai (laisse l'utilisateur se préparer)
     setTimeout(() => visitPoint(0), 600);
   }
 
@@ -1495,13 +1827,14 @@
     let idx = 0;
     const errors = [];
     const rawPredsByPoint = []; // prédictions brutes pour calcul biais
+    const rawGazeByPoint = [];
 
     function showNext() {
       const old = overlay.querySelector('.val-point-wrap');
       if (old) old.remove();
 
       if (idx >= grid.length) {
-        const filtered = removeOutliers(errors.map((e, i) => ({ x: e, y: i })), CONFIG.OUTLIER_SIGMA)
+        const filtered = removeOutliers(errors.map(e => ({ x: e.err, y: 0 })), CONFIG.OUTLIER_SIGMA)
                          .map(o => o.x);
         const meanErr = mean(filtered.length ? filtered : errors.map(o => o.err));
         const stdErr  = stdDev(filtered.length ? filtered : errors.map(o => o.err));
@@ -1509,11 +1842,14 @@
         // Calcul biais global et par quadrant
         computeBiasCorrection(rawPredsByPoint, grid);
 
+        const quality = summarizeValidationQuality(errors);
         const score = {
           meanError:    meanErr,
           stdError:     stdErr,
           quadrantErrors: computeQuadrantErrors(rawPredsByPoint, grid),
           perPoint:     errors,
+          rawGazeByPoint,
+          quality,
         };
 
         lastScore = score;
@@ -1524,8 +1860,7 @@
       }
 
       const { xPct, yPct } = grid[idx];
-      const x = pxFromPct(xPct, window.innerWidth);
-      const y = pxFromPct(yPct, window.innerHeight);
+      const { x, y } = getSafeScreenPoint({ xPct, yPct });
 
       const wrap = document.createElement('div');
       wrap.className = 'val-point-wrap';
@@ -1566,7 +1901,9 @@
 
       const collected = [];
       const start = Date.now();
-      const total = CONFIG.COLLECT_DURATION_MS;
+      const settle = CONFIG.VALIDATION_SETTLE_MS;
+      const collect = CONFIG.COLLECT_DURATION_MS;
+      const total = settle + collect;
 
       const iv = setInterval(() => {
         const elapsed = Date.now() - start;
@@ -1574,22 +1911,52 @@
         ring.setAttribute('stroke-dashoffset', String(circ * (1 - progress)));
 
         const pred = getFilteredPrediction();
-        if (pred) collected.push({ x: pred.x, y: pred.y });
+        if (pred && elapsed >= settle) collected.push({ x: pred.x, y: pred.y });
 
         if (elapsed >= total) {
           clearInterval(iv);
 
-          // Filtre médian puis outliers
-          let pts = collected;
-          pts = medianFilterPoints(pts.length ? pts : [{ x, y }]);
+          const noData = collected.length === 0;
+          const rawSamples = collected.slice();
+          const roiPercent = percentInROI(rawSamples, x, y, CONFIG.ROI_RADIUS);
+          const sampleRate = samplesPerSecond(collected.length, collect);
+
+          let pts = rawSamples.slice();
           pts = removeOutliers(pts, CONFIG.OUTLIER_SIGMA);
+          pts = medianFilterPoints(pts.length ? pts : rawSamples);
 
-          const avgX = mean(pts.map(p => p.x));
-          const avgY = mean(pts.map(p => p.y));
-          const err  = distance(avgX, avgY, x, y);
+          const avgX = noData ? x : mean(pts.map(p => p.x));
+          const avgY = noData ? y : mean(pts.map(p => p.y));
+          const err  = noData ? Math.max(window.innerWidth, window.innerHeight) : distance(avgX, avgY, x, y);
 
-          errors.push({ err, x: avgX, y: avgY, targetX: x, targetY: y, xPct, yPct });
-          rawPredsByPoint.push({ predX: avgX, predY: avgY, targetX: x, targetY: y, xPct, yPct });
+          errors.push({
+            err, x: avgX, y: avgY, targetX: x, targetY: y, xPct, yPct,
+            roiPercent,
+            samplesPerSec: sampleRate,
+            sampleCount: collected.length,
+            noData,
+          });
+          rawGazeByPoint.push({
+            targetX: x,
+            targetY: y,
+            xPct,
+            yPct,
+            samples: rawSamples,
+          });
+          if (!noData) {
+            rawPredsByPoint.push({ predX: avgX, predY: avgY, targetX: x, targetY: y, xPct, yPct });
+          }
+          debugLog(noData ? 'error' : 'info', 'Validation point collected', {
+            index: idx + 1,
+            xPct,
+            yPct,
+            sampleCount: collected.length,
+            sampleRate,
+            roiPercent,
+            err,
+            noData,
+            predictionStats: { ...predictionStats },
+          });
 
           idx++;
           setTimeout(showNext, 300);
@@ -1598,6 +1965,64 @@
     }
 
     showNext();
+  }
+
+  function startMicroRecalibration(onDone) {
+    configureWebGazerForPrecision({ manualTraining: true });
+    createOverlay();
+    showTitle('Micro-recalibration', 'Cliquez quelques points pour corriger la dérive');
+    const points = CONFIG.MICRO_RECALIBRATION_POINTS.slice();
+    let idx = 0;
+
+    function nextPoint() {
+      const old = overlay.querySelector('.micro-point-wrap');
+      if (old) old.remove();
+
+      if (idx >= points.length) {
+        startValidationPhase(null, (score) => {
+          lastScore = score;
+          saveToStorage(score);
+          if (typeof onDone === 'function') onDone(score);
+          else showScore(score);
+        });
+        return;
+      }
+
+      const p = points[idx];
+      const { x, y } = getSafeScreenPoint(p);
+      let clicks = 0;
+
+      showTitle(
+        `Micro-recalibration — ${idx + 1} / ${points.length}`,
+        `Cliquez ${CONFIG.MICRO_RECALIBRATION_CLICKS} fois sur le point`
+      );
+
+      const wrap = document.createElement('div');
+      wrap.className = 'micro-point-wrap';
+      wrap.style.cssText = `position:absolute;left:${x-18}px;top:${y-18}px;width:36px;height:36px;`;
+      const dot = document.createElement('button');
+      dot.type = 'button';
+      dot.style.cssText = `
+        width:36px;height:36px;border-radius:50%;border:3px solid #fff;
+        background:#4ecdc4;color:#0f0f1a;font-weight:bold;cursor:pointer;
+        box-shadow:0 0 16px rgba(78,205,196,0.55);
+      `;
+      dot.textContent = `0/${CONFIG.MICRO_RECALIBRATION_CLICKS}`;
+      dot.addEventListener('click', event => {
+        event.stopPropagation();
+        recordCalibrationPoint(x, y);
+        clicks++;
+        dot.textContent = `${clicks}/${CONFIG.MICRO_RECALIBRATION_CLICKS}`;
+        if (clicks >= CONFIG.MICRO_RECALIBRATION_CLICKS) {
+          idx++;
+          setTimeout(nextPoint, 180);
+        }
+      });
+      wrap.appendChild(dot);
+      overlay.appendChild(wrap);
+    }
+
+    nextPoint();
   }
 
   // ─── Calcul de la correction de biais ─────────────────────────────────────
@@ -1675,6 +2100,80 @@
 
   // ─── Sélection du meilleur modèle de régression ───────────────────────────
 
+  function cloneCameraConstraints() {
+    return JSON.parse(JSON.stringify(CONFIG.CAMERA_CONSTRAINTS));
+  }
+
+  function tuneRegression() {
+    try {
+      const regs = webgazer.getRegression ? webgazer.getRegression() : null;
+      if (regs && regs[0]) {
+        regs[0].trailTime      = 0;
+        regs[0].ridgeParameter = CONFIG.RIDGE_PARAMETER;
+      }
+    } catch (_) {}
+  }
+
+  function configureWebGazerForPrecision(options) {
+    if (typeof webgazer === 'undefined') return;
+    installWebGazerDiagnostics();
+    const opts = options || {};
+    debugLog('info', 'configureWebGazerForPrecision()', { opts });
+    // setCameraConstraints et setInternalVideoBufferSizes sont retirés —
+    // ils forcent un re-init de la capture vidéo et divisent la fréquence par 4 (6 Hz au lieu de 30 Hz)
+    try { webgazer.setRegression('ridge'); } catch (_) {}
+    try { webgazer.saveDataAcrossSessions(false); } catch (_) {}
+    try { webgazer.applyKalmanFilter(true); } catch (_) {}
+    if (opts.manualTraining) {
+      try { webgazer.removeMouseEventListeners(); } catch (_) {}
+    }
+    tuneRegression();
+  }
+
+  function installWebGazerDiagnostics() {
+    if (typeof webgazer === 'undefined' || webgazerDiagnosticsInstalled) return;
+    webgazerDiagnosticsInstalled = true;
+    debugLog('info', 'Installing WebGazer diagnostics', {
+      version: CONFIG.VERSION,
+      keys: Object.keys(webgazer).filter(k => typeof webgazer[k] === 'function').sort(),
+    });
+
+    if (typeof webgazer.setTracker === 'function') {
+      const originalSetTracker = webgazer.setTracker.bind(webgazer);
+      webgazer.setTracker = function diagnosticSetTracker(name) {
+        debugLog(name === 'TFFaceMesh' ? 'info' : 'error', 'webgazer.setTracker called', {
+          name,
+          expected: 'TFFaceMesh',
+          stack: new Error().stack,
+        });
+        return originalSetTracker(name);
+      };
+    }
+
+    if (typeof webgazer.begin === 'function') {
+      const originalBegin = webgazer.begin.bind(webgazer);
+      webgazer.begin = function diagnosticBegin() {
+        debugLog('info', 'webgazer.begin called', { stack: new Error().stack });
+        const result = originalBegin();
+        if (result && typeof result.then === 'function') {
+          return result.then(value => {
+            debugLog('info', 'webgazer.begin resolved');
+            return value;
+          }).catch(err => {
+            debugLog('error', 'webgazer.begin rejected', { message: err && err.message, name: err && err.name });
+            throw err;
+          });
+        }
+        return result;
+      };
+    }
+  }
+
+  function recordCalibrationPoint(x, y) {
+    if (typeof webgazer === 'undefined') return;
+    try { webgazer.recordScreenPosition(x, y, 'click'); } catch (_) {}
+  }
+
   function selectBestRegression(onSelected) {
     if (typeof webgazer === 'undefined') { onSelected('ridge'); return; }
     try { webgazer.setRegression('ridge'); } catch (_) {}
@@ -1703,27 +2202,30 @@
       for (let c = 0; c < cols; c++) {
         const idx = r * cols + c;
         const pt  = grid[idx];
-        const x0  = pxFromPct(pt.xPct, window.innerWidth);
-        const y0  = pxFromPct(pt.yPct, window.innerHeight);
+        const p0 = getSafeScreenPoint(pt);
+        const x0 = p0.x;
+        const y0 = p0.y;
 
         // Voisin à droite
         if (c + 1 < cols) {
           const nb  = grid[r * cols + c + 1];
-          const x1  = pxFromPct(nb.xPct, window.innerWidth);
-          const y1  = pxFromPct(nb.yPct, window.innerHeight);
+          const p1 = getSafeScreenPoint(nb);
+          const x1 = p1.x;
+          const y1 = p1.y;
           for (let s = 1; s <= steps; s++) {
             const t = s / (steps + 1);
-            try { webgazer.recordScreenPosition(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, 'click'); } catch (_) {}
+            recordCalibrationPoint(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
           }
         }
         // Voisin en dessous
         if (r + 1 < rows) {
           const nb  = grid[(r + 1) * cols + c];
-          const x1  = pxFromPct(nb.xPct, window.innerWidth);
-          const y1  = pxFromPct(nb.yPct, window.innerHeight);
+          const p1 = getSafeScreenPoint(nb);
+          const x1 = p1.x;
+          const y1 = p1.y;
           for (let s = 1; s <= steps; s++) {
             const t = s / (steps + 1);
-            try { webgazer.recordScreenPosition(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, 'click'); } catch (_) {}
+            recordCalibrationPoint(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t);
           }
         }
       }
@@ -1795,13 +2297,69 @@
 
   // ─── Affichage du score final ──────────────────────────────────────────────
 
+  function showValidationVisualization(score) {
+    if (!score || !Array.isArray(score.rawGazeByPoint)) return;
+    removeOverlay();
+    createOverlay();
+    showTitle('Carte de validation', 'Vert = dans la zone acceptable, rouge = hors zone');
+
+    const canvas = document.createElement('canvas');
+    const dpr2 = window.devicePixelRatio || 1;
+    canvas.width  = window.innerWidth  * dpr2;
+    canvas.height = window.innerHeight * dpr2;
+    canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;background:#10182f;';
+    overlay.appendChild(canvas);
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    ctx.scale(dpr2, dpr2);
+
+    score.rawGazeByPoint.forEach(point => {
+      const targetX = point.targetX;
+      const targetY = point.targetY;
+      ctx.beginPath();
+      ctx.arc(targetX, targetY, CONFIG.ROI_RADIUS, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(78,205,196,0.08)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(78,205,196,0.5)';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(targetX, targetY, 8, 0, Math.PI * 2);
+      ctx.fillStyle = '#e67e22';
+      ctx.fill();
+
+      (point.samples || []).forEach(sample => {
+        const ok = distance(sample.x, sample.y, targetX, targetY) <= CONFIG.ROI_RADIUS;
+        ctx.beginPath();
+        ctx.arc(sample.x, sample.y, 3, 0, Math.PI * 2);
+        ctx.fillStyle = ok ? 'rgba(39,174,96,0.65)' : 'rgba(231,76,60,0.65)';
+        ctx.fill();
+      });
+    });
+
+    const btnBack = document.createElement('button');
+    btnBack.textContent = 'Retour aux résultats';
+    btnBack.style.cssText = _btnStyle('#4ecdc4') + 'position:absolute;right:24px;bottom:24px;color:#0f0f1a;font-weight:bold;';
+    btnBack.addEventListener('click', () => showScore(score));
+    overlay.appendChild(btnBack);
+  }
+
   function showScore(score) {
     removeOverlay();
     createOverlay();
+    startGazeDot();   // relance le dot rouge sur l'écran de score
 
-    const needsRecal = score.meanError > CONFIG.RECALIBRATION_THRESHOLD;
-    const color  = needsRecal ? '#e74c3c' : '#27ae60';
-    const verdict = needsRecal ? 'Calibration insuffisante' : 'Calibration réussie !';
+    const quality = score.quality || summarizeValidationQuality(score.perPoint);
+    const needsRecal =
+      score.meanError > CONFIG.RECALIBRATION_THRESHOLD ||
+      quality.minRoiPercent < CONFIG.MIN_ROI_PERCENT ||
+      quality.noDataPoints.length > 0 ||
+      quality.lowSampleRate;
+    const isLimit = !needsRecal && score.meanError > CONFIG.RECALIBRATION_THRESHOLD * 0.7;
+    const color   = needsRecal ? '#e74c3c' : isLimit ? '#e67e22' : '#27ae60';
+    const verdict = needsRecal ? 'Calibration insuffisante'
+                  : isLimit    ? 'Calibration acceptable ⚠️'
+                  :              'Calibration réussie ✓';
 
     // Identifier les quadrants défaillants
     const weakQuads = [];
@@ -1834,6 +2392,32 @@
       : '';
 
     const drift = getDriftScore();
+    const qualityRows = `
+        <tr>
+          <td style="padding:7px 14px;text-align:left;color:#aaa;">Samples dans ROI (moy/min)</td>
+          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${quality.minRoiPercent < CONFIG.MIN_ROI_PERCENT ? '#e74c3c' : '#27ae60'};">
+            ${quality.meanRoiPercent.toFixed(0)}% / ${quality.minRoiPercent.toFixed(0)}%
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:7px 14px;text-align:left;color:#aaa;">Fréquence WebGazer (moy/min)</td>
+          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${quality.lowSampleRate ? '#e74c3c' : '#27ae60'};">
+            ${quality.meanSamplesPerSec.toFixed(1)} / ${quality.minSamplesPerSec.toFixed(1)} Hz
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:7px 14px;text-align:left;color:#aaa;">Points sans données</td>
+          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${quality.noDataPoints.length ? '#e74c3c' : '#27ae60'};">
+            ${quality.noDataPoints.length}
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:7px 14px;text-align:left;color:#aaa;">Points ROI faibles</td>
+          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${quality.weakPoints.length ? '#e74c3c' : '#27ae60'};">
+            ${quality.weakPoints.length}
+          </td>
+        </tr>
+    `;
     const driftRow = drift
       ? `<tr>
           <td style="padding:5px 14px;text-align:left;color:#aaa;">Dérive estimée</td>
@@ -1854,6 +2438,7 @@
           <td style="padding:7px 14px;text-align:left;color:#aaa;">Écart-type</td>
           <td style="padding:7px 14px;text-align:right;font-weight:bold;">${score.stdError.toFixed(1)} px</td>
         </tr>
+        ${qualityRows}
         <tr><td colspan="2" style="padding:6px 14px;color:#4ecdc4;font-size:.8rem;text-align:left;">— Précision par quadrant —</td></tr>
         ${qRows}
         ${driftRow}
@@ -1864,6 +2449,12 @@
       </table>
       <p style="font-size:1.05rem;font-weight:bold;color:${color};margin-bottom:16px;">${verdict}</p>
     `;
+
+    const btnViz = document.createElement('button');
+    btnViz.textContent = 'Voir la carte des points';
+    btnViz.style.cssText = _btnStyle('#3498db');
+    btnViz.addEventListener('click', () => showValidationVisualization(score));
+    container.appendChild(btnViz);
 
     // Bouton Continuer
     if (!needsRecal) {
@@ -1896,6 +2487,8 @@
                   stdError:  (score.stdError  + newScore.stdError)  / 2,
                   quadrantErrors: newScore.quadrantErrors,
                   perPoint:  newScore.perPoint,
+                  rawGazeByPoint: newScore.rawGazeByPoint,
+                  quality: newScore.quality,
                 };
                 lastScore = merged;
                 saveToStorage(merged);
@@ -1943,6 +2536,7 @@
         meanError:      score.meanError,
         stdError:       score.stdError,
         quadrantErrors: score.quadrantErrors || null,
+        quality:        score.quality || null,
         threshold:      CONFIG.RECALIBRATION_THRESHOLD,
         biasX,
         biasY,
@@ -1976,45 +2570,58 @@
     start(onComplete) {
       onCompleteCallback = onComplete || null;
       kalman.reset(); oneEuro.reset();
+      lastFilteredPrediction = null;
+      pendingPredictionRequest = false;
       implicitClicks = [];
 
-      // Activer saveDataAcrossSessions et Kalman WebGazer natif
-      if (typeof webgazer !== 'undefined') {
-        try { webgazer.saveDataAcrossSessions(true); } catch (_) {}
-        try { webgazer.applyKalmanFilter(true); }      catch (_) {}
-      }
-
-      // Restaurer biais d'une session précédente
-      loadBiasFromStorage();
-
-      selectBestRegression(() => {
-        startPreQuestionnairePhase(() => {
-          startGuidancePhase(() => {
-            startCalibrationPhase(null, () => {
-              showPhaseSplash(
-                'Phase 2 — Balle animée',
-                'Les points cliquables sont terminés. Maintenant, suivez la balle du regard sans bouger la tête ni cliquer.',
-                '🔵',
-                3000,
-                () => startAnimatedCalibrationPhase(() => {
-                  createOverlay();
-                  startValidationPhase(null, (score) => showScore(score));
-                })
-              );
+      function _doStart() {
+        loadBiasFromStorage();
+        selectBestRegression(() => {
+          startPreQuestionnairePhase(() => {
+            startGuidancePhase(() => {
+              startCalibrationPhase(null, () => {
+                createOverlay();
+                startValidationPhase(null, (score) => showScore(score));
+              });
             });
           });
         });
-      });
+      }
+
+      if (typeof webgazer === 'undefined') {
+        _doStart();
+        return;
+      }
+
+      // S'assurer que WebGazer est démarré avec les bons paramètres.
+      // saveDataAcrossSessions(false) AVANT begin() : on ne veut pas charger
+      // un ancien modèle qui biaiserait la nouvelle calibration.
+      try { webgazer.saveDataAcrossSessions(false); } catch (_) {}
+      try { webgazer.removeMouseEventListeners(); } catch (_) {}
+      try { webgazer.applyKalmanFilter(true); } catch (_) {}
+
+      const beginPromise = webgazer.setRegression('ridge').setTracker('TFFaceMesh').begin();
+      tuneRegression();
+
+      if (beginPromise && typeof beginPromise.then === 'function') {
+        beginPromise.then(_doStart).catch(err => {
+          debugLog('error', 'webgazer.begin failed in Calibration.start', { message: err && err.message });
+          _doStart(); // tenter quand même
+        });
+      } else {
+        _doStart();
+      }
     },
 
     startAnimated(onComplete) {
       onCompleteCallback = onComplete || null;
       kalman.reset(); oneEuro.reset();
+      lastFilteredPrediction = null;
+      pendingPredictionRequest = false;
       implicitClicks = [];
 
       if (typeof webgazer !== 'undefined') {
-        try { webgazer.saveDataAcrossSessions(true); } catch (_) {}
-        try { webgazer.applyKalmanFilter(true); }      catch (_) {}
+        configureWebGazerForPrecision({ manualTraining: true });
       }
 
       loadBiasFromStorage();
@@ -2050,7 +2657,12 @@
       implicitClicks = [];
       kalman.reset();
       oneEuro.reset();
+      lastFilteredPrediction = null;
+      pendingPredictionRequest = false;
     },
+
+    // Charger le profil de calibration depuis localStorage (biais + IDW nodes)
+    loadProfile() { loadBiasFromStorage(); },
 
     // Appliquer la correction de biais à une prédiction externe
     applyBiasCorrection(x, y) {
@@ -2066,6 +2678,9 @@
     },
 
     getDriftScore,
+    startMicroRecalibration,
+    getDebugLog() { return debugEvents.slice(); },
+    getPredictionStats() { return { ...predictionStats }; },
 
     detectFixations,
     detectSaccades,
@@ -2075,20 +2690,29 @@
     CONFIG,
     CALIBRATION_GRID,
     VALIDATION_GRID,
-    _helpers: { distance, mean, stdDev, median, pxFromPct, removeOutliers, medianFilterPoints, getQuadrant, detectFixations, detectSaccades, linkEvents, checkStability, applyIDWCorrection, applyLOWESS, computeIDWField, injectSyntheticCalibrationData },
+    _helpers: { distance, mean, stdDev, median, pxFromPct, getSafeScreenPoint, removeOutliers, medianFilterPoints, percentInROI, samplesPerSecond, summarizeValidationQuality, getQuadrant, detectFixations, detectSaccades, linkEvents, checkStability, applyIDWCorrection, applyLOWESS, computeIDWField, injectSyntheticCalibrationData },
     _kalman: KalmanFilter,
     _oneEuro: OneEuroFilter,
     _internal: {
       startAnimatedCalibrationPhase,
+      startMicroRecalibration,
       get idwNodes() { return idwNodes; },
     },
   };
 
   global.Calibration = Calibration;
+  if (typeof webgazer !== 'undefined') {
+    installWebGazerDiagnostics();
+    debugLog('info', 'calibration.js loaded', { version: CONFIG.VERSION, href: typeof location !== 'undefined' ? location.href : null });
+  } else {
+    debugLog('warn', 'calibration.js loaded before WebGazer', { version: CONFIG.VERSION });
+  }
 
-  // Auto-setup curseur et panneau de coordonnées au chargement de la page
+  // Auto-setup curseur et panneau de coordonnées uniquement sur calibration.html
   if (typeof window !== 'undefined' && typeof document !== 'undefined') {
     window.addEventListener('load', function () {
+      const isCalibrationPage = !!document.getElementById('home-screen');
+      if (!isCalibrationPage) return;
       preventHomeTextSelection();
       createGazeCoordPanel();
       if (typeof webgazer !== 'undefined') {
