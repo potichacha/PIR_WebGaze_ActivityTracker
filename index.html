@@ -755,20 +755,39 @@ function scrollToSection(id) {
   _updateDemoCalScore();
 })();
 
-// ── WebGazer status bar ───────────────────────────────────────────────────────
-window.addEventListener('load', function () {
-  const bar = document.getElementById('wg-status-bar');
-  if (typeof webgazer !== 'undefined') {
-    bar.className = 'ready';
-    document.getElementById('wg-status-text').textContent =
-      'WebGazer chargé. Cliquez "Démarrer la calibration".';
-    console.info('[index.html] WebGazer OK — screen=' + screen.width + 'x' + screen.height
-      + ' inner=' + window.innerWidth + 'x' + window.innerHeight
-      + ' dpr=' + window.devicePixelRatio);
-  } else {
+// ── WebGazer preview au chargement — caméra + FaceMesh visible immédiatement ──
+window.addEventListener('load', async function () {
+  const bar     = document.getElementById('wg-status-bar');
+  const statusTxt = document.getElementById('wg-status-text');
+
+  if (typeof webgazer === 'undefined') {
     bar.className = 'error';
-    document.getElementById('wg-status-text').textContent =
-      'WebGazer non disponible (hors ligne ?).';
+    statusTxt.textContent = 'WebGazer non disponible (hors ligne ?).';
+    return;
+  }
+
+  console.info('[index.html] WebGazer OK — screen=' + screen.width + 'x' + screen.height
+    + ' inner=' + window.innerWidth + 'x' + window.innerHeight
+    + ' dpr=' + window.devicePixelRatio);
+
+  statusTxt.textContent = 'Démarrage de la caméra…';
+
+  try {
+    // Démarrage preview : caméra + FaceMesh, pas de gaze listener, pas d'entraînement
+    webgazer.saveDataAcrossSessions(false);
+    webgazer.showVideo(true).showFaceOverlay(true).showFaceFeedbackBox(true);
+    await webgazer.setRegression('ridge').setTracker('TFFacemesh').begin();
+    webgazer.applyKalmanFilter(true);
+    webgazer.removeMouseEventListeners();
+    // Pas de setGazeListener ici — juste le flux caméra pour le positionnement
+    _wgStarted = true;
+
+    bar.className = 'ready';
+    statusTxt.textContent = 'Caméra active — positionnez votre visage dans le cadre, puis cliquez "Démarrer la calibration".';
+  } catch (err) {
+    bar.className = 'error';
+    statusTxt.textContent = 'Erreur caméra : ' + (err.message || String(err));
+    console.error('[index.html] webgazer.begin failed', err);
   }
 });
 
@@ -885,7 +904,7 @@ document.getElementById('btn-cal-start').addEventListener('click', function () {
     bar.className = 'ready';
     document.getElementById('wg-status-text').textContent =
       'Calibration terminée. WebGazer actif.';
-  });
+  }, { alreadyStarted: _wgStarted });
 });
 
 // ── Reset button ──────────────────────────────────────────────────────────────
@@ -1050,7 +1069,6 @@ async function _startGaze() {
     Calibration.loadProfile();
 
     if (!_wgStarted) {
-      // saveDataAcrossSessions false : on gère nous-mêmes via restoreTrainingData()
       webgazer.saveDataAcrossSessions(false);
       webgazer.showVideo(true).showFaceOverlay(true).showFaceFeedbackBox(true);
       await webgazer.setRegression('ridge').setTracker('TFFacemesh').begin();
@@ -1058,7 +1076,8 @@ async function _startGaze() {
       webgazer.removeMouseEventListeners();
       _wgStarted = true;
     } else {
-      webgazer.resume();
+      // WebGazer déjà actif (preview ou post-calibration) — juste s'assurer qu'il tourne
+      try { webgazer.resume(); } catch (_) {}
       webgazer.showVideo(true).showFaceOverlay(true).showFaceFeedbackBox(true);
       webgazer.removeMouseEventListeners();
     }

@@ -2461,6 +2461,7 @@
     btnOk.textContent = needsRecal ? 'Continuer quand même →' : 'Continuer →';
     btnOk.style.cssText = _btnStyle(needsRecal ? '#7f8c8d' : '#27ae60');
     btnOk.addEventListener('click', () => {
+      stopGazeDot();
       removeOverlay();
       if (typeof onCompleteCallback === 'function') onCompleteCallback(score);
     });
@@ -2582,12 +2583,15 @@
   // ─── API publique ──────────────────────────────────────────────────────────
 
   const Calibration = {
-    start(onComplete) {
+    start(onComplete, opts) {
       onCompleteCallback = onComplete || null;
       kalman.reset(); oneEuro.reset();
       lastFilteredPrediction = null;
       pendingPredictionRequest = false;
       implicitClicks = [];
+
+      // opts.alreadyStarted = true si WebGazer a déjà été démarré par la page hôte
+      const alreadyStarted = opts && opts.alreadyStarted;
 
       function _doStart() {
         loadBiasFromStorage();
@@ -2604,6 +2608,17 @@
 
       if (typeof webgazer === 'undefined') {
         _doStart();
+        return;
+      }
+
+      // Si WebGazer est déjà démarré (preview mode), on saute begin() et on
+      // démarre directement après un court délai de stabilisation.
+      if (alreadyStarted) {
+        try { webgazer.saveDataAcrossSessions(false); } catch (_) {}
+        try { webgazer.removeMouseEventListeners(); } catch (_) {}
+        try { webgazer.applyKalmanFilter(true); } catch (_) {}
+        try { webgazer.clearData(); } catch (_) {}
+        setTimeout(_doStart, 1000);
         return;
       }
 
