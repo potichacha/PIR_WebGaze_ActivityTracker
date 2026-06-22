@@ -41,7 +41,8 @@ global.document = {
 require('../src/calibration/calibration.js');
 
 const Cal = global.Calibration;
-const { distance, mean, stdDev, median, pxFromPct, getSafeScreenPoint, removeOutliers, medianFilterPoints, percentInROI, samplesPerSecond, summarizeValidationQuality, getQuadrant, detectFixations, detectSaccades, linkEvents, checkStability } = Cal._helpers;
+const { distance, mean, stdDev, median, pxFromPct, getSafeScreenPoint, removeOutliers, removeOutliers1D, medianFilterPoints, percentInROI, samplesPerSecond, summarizeValidationQuality, getQuadrant, detectFixations, detectSaccades, linkEvents, checkStability, applySpatialCorrection, correctWithNodes, computeLooError, computeIDWField } = Cal._helpers;
+const OneEuroFilter = Cal._oneEuro;
 const { CONFIG, CALIBRATION_GRID, VALIDATION_GRID } = Cal;
 const KalmanFilter = Cal._kalman;
 
@@ -255,7 +256,7 @@ assertApprox(samplesPerSecond(40, 2000), 20, 0.001,
 
 const quality = summarizeValidationQuality([
   { roiPercent: 80, samplesPerSec: 25 },
-  { roiPercent: 40, samplesPerSec: 12, noData: true },
+  { roiPercent: 40, samplesPerSec: 5, noData: true }, // 5 Hz < MIN_SAMPLES_PER_SEC (8)
 ]);
 assertApprox(quality.meanRoiPercent, 60, 0.001, 'ROI moyenne = 60%');
 assert(quality.weakPoints.length === 1, 'Un point faible ROI détecté');
@@ -762,6 +763,106 @@ const perfSaccades = detectSaccades(perfSaccData, 0.7);
 const tS = Date.now() - tS0;
 assert(tS < 50, `detectSaccades < 50ms sur 10 000 points (${tS}ms)`);
 assert(Array.isArray(perfSaccades), 'detectSaccades retourne bien un tableau');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST 34 — removeOutliers1D
+// ═══════════════════════════════════════════════════════════════════════════════
+section('Test 34 : removeOutliers1D');
+
+const errs1d = [100, 105, 98, 102, 101, 99, 900]; // 900 = outlier
+const filtered1d = removeOutliers1D(errs1d, 2);
+assert(filtered1d.length === errs1d.length - 1, 'removeOutliers1D retire l\'outlier 1D');
+assert(!filtered1d.includes(900), 'L\'outlier 900 est bien retiré');
+assert(removeOutliers1D([1, 2], 2).length === 2, 'removeOutliers1D < 4 valeurs → retourne tout');
+assert(removeOutliers1D([5, 5, 5, 5], 2).length === 4, 'stdDev=0 → aucune suppression (pas de division par 0)');
+assert(Array.isArray(removeOutliers1D(null, 2)), 'removeOutliers1D(null) → tableau');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST 35 — applySpatialCorrection : pas de double correction
+// ═══════════════════════════════════════════════════════════════════════════════
+section('Test 35 : Correction spatiale unique (anti sur-correction)');
+
+// Sans nœuds ni biais → identité
+Cal.reset();
+const idn = applySpatialCorrection(800, 450);
+assertApprox(idn.x, 800, 0.001, 'Sans correction → x inchangé');
+assertApprox(idn.y, 450, 0.001, 'Sans correction → y inchangé');
+
+// Avec un champ de correction : la correction sur un nœud doit ramener vers la cible,
+// PAS au-delà (ce qui serait le signe d'une double correction IDW+LOWESS).
+const preds = [
+  { targetX: 200, targetY: 200, predX: 230, predY: 210 },
+  { targetX: 1600, targetY: 200, predX: 1630, predY: 215 },
+  { targetX: 200, targetY: 800, predX: 225, predY: 815 },
+  { targetX: 1600, targetY: 800, predX: 1625, predY: 820 },
+  { targetX: 900, targetY: 500, predX: 928, predY: 512 },
+];
+computeIDWField(preds);
+// Sur un nœud exact, la correction doit annuler ~exactement l'erreur (pas la doubler)
+const corrAtNode = applySpatialCorrection(928, 512); // pred du dernier nœud
+const errBefore = distance(928, 512, 900, 500);
+const errAfter  = distance(corrAtNode.x, corrAtNode.y, 900, 500);
+assert(errAfter < errBefore, 'La correction réduit l\'erreur sur un nœud');
+assert(errAfter < errBefore * 0.6, `La correction ne sur-corrige pas (err ${errAfter.toFixed(1)} < ${(errBefore*0.6).toFixed(1)})`);
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST 36 — computeLooError : erreur de généralisation
+// ═══════════════════════════════════════════════════════════════════════════════
+section('Test 36 : Leave-one-out cross-validation');
+
+const loo = computeLooError(preds);
+assert(loo !== null, 'computeLooError retourne un résultat avec ≥3 points');
+assert(typeof loo.meanError === 'number' && loo.meanError >= 0, 'meanError LOO est un nombre positif');
+assert(loo.n >= 3, `LOO utilise au moins 3 points (${loo.n})`);
+// La LOO doit être ≥ l'erreur résiduelle sur les points eux-mêmes (généralisation plus dure)
+assert(computeLooError([{ targetX: 0, targetY: 0, predX: 1, predY: 1 }]) === null,
+  'computeLooError < 3 points → null');
+Cal.reset();
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST 37 — One Euro Filter : lissage et réactivité
+// ═══════════════════════════════════════════════════════════════════════════════
+section('Test 37 : One Euro Filter');
+
+const oe = new OneEuroFilter();
+const f0 = oe.filter(500, 300, 1000);
+assert(f0.x === 500 && f0.y === 300, 'One Euro : 1re mesure renvoyée telle quelle');
+// Bruit autour d'une position fixe → sortie proche de la moyenne, variance réduite
+let oeOut = null;
+for (let i = 1; i <= 30; i++) {
+  oeOut = oe.filter(500 + (Math.random() - 0.5) * 20, 300 + (Math.random() - 0.5) * 20, 1000 + i * 33);
+}
+assertApprox(oeOut.x, 500, 15, 'One Euro lisse le bruit autour de X=500');
+assertApprox(oeOut.y, 300, 15, 'One Euro lisse le bruit autour de Y=300');
+oe.reset();
+const fr = oe.filter(100, 100, 2000);
+assert(fr.x === 100, 'One Euro.reset() réinitialise l\'état');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST 38 — smoothPrediction / resetSmoothing (API runtime)
+// ═══════════════════════════════════════════════════════════════════════════════
+section('Test 38 : API runtime smoothPrediction');
+
+assert(typeof Cal.smoothPrediction === 'function', 'Calibration.smoothPrediction exposé');
+assert(typeof Cal.resetSmoothing === 'function', 'Calibration.resetSmoothing exposé');
+assert(typeof Cal.captureHeadReference === 'function', 'Calibration.captureHeadReference exposé');
+Cal.reset(); Cal.resetSmoothing();
+const sp0 = Cal.smoothPrediction(640, 360, 1000);
+assert(sp0 && sp0.x === 640 && sp0.y === 360, 'smoothPrediction : 1re valeur sans correction = entrée');
+assert(Cal.smoothPrediction(null, 360, 1000) === null, 'smoothPrediction(null) → null');
+assert(Cal.smoothPrediction(NaN, 1, 1) === null, 'smoothPrediction(NaN) → null');
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TEST 39 — Compensation tête : no-op sans tracker WebGazer
+// ═══════════════════════════════════════════════════════════════════════════════
+section('Test 39 : Compensation tête sans WebGazer');
+
+assert(typeof Cal.getHeadCompensation === 'function', 'getHeadCompensation exposé');
+const hc = Cal.getHeadCompensation();
+assert(hc.dx === 0 && hc.dy === 0, 'Sans tracker WebGazer → compensation nulle (dx=dy=0)');
+assert(typeof CONFIG.HEAD_COMPENSATION_ENABLED === 'boolean', 'HEAD_COMPENSATION_ENABLED défini');
+assert(CONFIG.HEAD_COMP_GAIN > 0, `HEAD_COMP_GAIN > 0 (${CONFIG.HEAD_COMP_GAIN})`);
+assert(CONFIG.HEAD_COMP_MAX_PX > 0, `HEAD_COMP_MAX_PX > 0 (${CONFIG.HEAD_COMP_MAX_PX})`);
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // Résumé

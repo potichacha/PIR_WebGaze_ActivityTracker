@@ -88,6 +88,10 @@
     ONE_EURO_MIN_CUTOFF:       1.0,   // Hz — plus haut = moins de lag, moins de lissage
     ONE_EURO_BETA:             0.007, // réactivité saccades : augmenter si encore trop lent
     ONE_EURO_D_CUTOFF:         1.0,   // Hz — coupure sur la dérivée (laisser à 1.0)
+    // ── Compensation des mouvements de tête ───────────────────────────────
+    HEAD_COMPENSATION_ENABLED: true,
+    HEAD_COMP_GAIN:            6.0,   // pixels écran par pixel de déplacement du centroïde facial
+    HEAD_COMP_MAX_PX:          250,   // borne de sécurité sur l'offset appliqué
     // Kalman conservé uniquement pour l'API interne (non utilisé dans getFilteredPrediction)
     KALMAN_Q:                  0.05,
     KALMAN_R:                  200,
@@ -554,13 +558,77 @@
     this.tPrev  = null;
   };
 
+  // ─── Compensation des mouvements de tête ─────────────────────────────────────
+  // WebGazer suppose la tête immobile : tout déplacement du visage entre la
+  // calibration et l'usage introduit une dérive systématique. On lit le centroïde
+  // des landmarks faciaux, on mémorise une référence à la fin de la calibration,
+  // puis on applique un offset écran proportionnel au déplacement du visage.
+  //
+  // Le facteur de gain mappe « pixels de déplacement du visage dans le flux
+  // webcam » → « pixels de compensation à l'écran ». Sa valeur exacte dépend de
+  // la géométrie (distance, FOV) ; HEAD_COMP_GAIN est un défaut prudent et
+  // configurable. Activable/désactivable via HEAD_COMPENSATION_ENABLED.
+
+  let headRef = null; // { x, y } centroïde de référence (coords flux webcam)
+
+  // Récupère le centroïde du visage depuis le tracker WebGazer, de façon
+  // défensive (l'API varie selon les versions / trackers).
+  function getFaceCentroid() {
+    if (typeof webgazer === 'undefined') return null;
+    let positions = null;
+    try {
+      const tracker = webgazer.getTracker ? webgazer.getTracker() : null;
+      if (tracker && typeof tracker.getPositions === 'function') {
+        positions = tracker.getPositions();
+      }
+    } catch (_) { return null; }
+    if (!positions || !positions.length) return null;
+    let sx = 0, sy = 0, n = 0;
+    for (const p of positions) {
+      // Les landmarks peuvent être [x, y] ou {x, y} selon le tracker.
+      const px = Array.isArray(p) ? p[0] : (p && p.x);
+      const py = Array.isArray(p) ? p[1] : (p && p.y);
+      if (Number.isFinite(px) && Number.isFinite(py)) { sx += px; sy += py; n++; }
+    }
+    if (!n) return null;
+    return { x: sx / n, y: sy / n };
+  }
+
+  // Mémorise la position de tête de référence (fin de calibration).
+  function captureHeadReference() {
+    if (!CONFIG.HEAD_COMPENSATION_ENABLED) { headRef = null; return; }
+    const c = getFaceCentroid();
+    if (c) {
+      headRef = c;
+      debugLog('info', 'Head reference captured', { x: Math.round(c.x), y: Math.round(c.y) });
+    }
+  }
+
+  // Offset écran à AJOUTER à la prédiction pour compenser le déplacement de tête.
+  function getHeadCompensation() {
+    if (!CONFIG.HEAD_COMPENSATION_ENABLED || !headRef) return { dx: 0, dy: 0 };
+    const c = getFaceCentroid();
+    if (!c) return { dx: 0, dy: 0 };
+    // Le visage qui se déplace vers la droite dans le flux (déjà miroir interne)
+    // implique que le regard estimé dérive ; on compense dans le sens inverse.
+    const gain = CONFIG.HEAD_COMP_GAIN;
+    let dx = -(c.x - headRef.x) * gain;
+    let dy = -(c.y - headRef.y) * gain;
+    // Borne de sécurité : ne jamais déplacer de plus de HEAD_COMP_MAX_PX
+    const max = CONFIG.HEAD_COMP_MAX_PX;
+    dx = Math.max(-max, Math.min(max, dx));
+    dy = Math.max(-max, Math.min(max, dy));
+    return { dx, dy };
+  }
+
   // ─── État interne ──────────────────────────────────────────────────────────
   let overlay            = null;
   let currentPointIndex  = 0;
   let lastScore          = null;
   let onCompleteCallback = null;
   let kalman             = new KalmanFilter();   // conservé pour l'API interne
-  let oneEuro            = new OneEuroFilter();
+  let oneEuro            = new OneEuroFilter();   // utilisé pendant la calibration
+  let runtimeOneEuro     = new OneEuroFilter();   // utilisé pendant la démo (temps réel)
   let lastPredTime       = 0;
   let lastFilteredPrediction = null;
   let pendingPredictionRequest = false;
@@ -724,6 +792,15 @@
     };
   }
 
+  // Supprimer les outliers 1D au-delà de N*σ (tableau de nombres)
+  function removeOutliers1D(values, sigma) {
+    if (!Array.isArray(values) || values.length < 4) return values || [];
+    const m = mean(values);
+    const s = stdDev(values);
+    if (s === 0) return values.slice();
+    return values.filter(v => Math.abs(v - m) <= sigma * s);
+  }
+
   // Supprimer les outliers au-delà de N*σ
   function removeOutliers(points, sigma) {
     if (points.length < 4) return points;
@@ -774,17 +851,9 @@
     const oe = oneEuro.filter(x, y, now);
     x = oe.x; y = oe.y;
 
-    // ── [2] Correction spatiale IDW + LOWESS (après validation) ──────────
-    if (idwNodes.length > 0) {
-      const idw    = applyIDWCorrection(x, y);
-      const lowess = applyLOWESS(idw.x, idw.y);
-      x = lowess.x; y = lowess.y;
-    } else {
-      // Avant la première validation : biais global + quadrant
-      const q = getQuadrant(x, y);
-      x = x - biasX - quadrantBias[q].x;
-      y = y - biasY - quadrantBias[q].y;
-    }
+    // ── [2] Correction spatiale (un seul estimateur — pas de cascade) ────
+    const corrected = applySpatialCorrection(x, y);
+    x = corrected.x; y = corrected.y;
 
     lastFilteredPrediction = { x, y, timestamp: now };
     return lastFilteredPrediction;
@@ -1834,18 +1903,26 @@
       if (old) old.remove();
 
       if (idx >= grid.length) {
-        const filtered = removeOutliers(errors.map(e => ({ x: e.err, y: 0 })), CONFIG.OUTLIER_SIGMA)
-                         .map(o => o.x);
-        const meanErr = mean(filtered.length ? filtered : errors.map(o => o.err));
-        const stdErr  = stdDev(filtered.length ? filtered : errors.map(o => o.err));
+        // Erreur BRUTE (avant correction) avec outliers retirés en 1D.
+        const rawErrs = removeOutliers1D(errors.map(e => e.err), CONFIG.OUTLIER_SIGMA);
+        const usedErrs = rawErrs.length ? rawErrs : errors.map(e => e.err);
+        const meanErr = mean(usedErrs);
+        const stdErr  = stdDev(usedErrs);
 
-        // Calcul biais global et par quadrant
+        // Erreur de GÉNÉRALISATION (leave-one-out) — score honnête après correction.
+        const loo = computeLooError(rawPredsByPoint);
+
+        // Calcul biais global et par quadrant + champ de correction
         computeBiasCorrection(rawPredsByPoint, grid);
 
         const quality = summarizeValidationQuality(errors);
         const score = {
+          // meanError reste l'erreur brute (rétro-compatible avec le seuil existant)
           meanError:    meanErr,
           stdError:     stdErr,
+          // Erreur réaliste après correction spatiale, estimée par LOO.
+          looError:     loo ? loo.meanError : null,
+          looStdError:  loo ? loo.stdError  : null,
           quadrantErrors: computeQuadrantErrors(rawPredsByPoint, grid),
           perPoint:     errors,
           rawGazeByPoint,
@@ -2052,6 +2129,9 @@
 
     // [D] Construire le champ de correction IDW à partir des points de validation
     computeIDWField(predsByPoint);
+
+    // Mémoriser la position de tête de référence pour la compensation runtime.
+    captureHeadReference();
   }
 
   // ─── Score par quadrant ────────────────────────────────────────────────────
@@ -2264,14 +2344,13 @@
   }
 
   // ─── [E] LOWESS post-correction ────────────────────────────────────────────
-  // Régression locale pondérée par distance aux points de validation.
-  // Affine la correction IDW avec un lissage tricubique.
+  // Régression locale pondérée par distance aux nœuds de correction.
 
   function applyLOWESS(x, y) {
     if (!CONFIG.LOWESS_ENABLED || !idwNodes.length) return { x, y };
     const EPS = 1e-6;
 
-    // Distance de chaque nœud de validation au point courant
+    // Distance de chaque nœud de correction au point courant
     const dists = idwNodes.map(nd =>
       Math.sqrt((x - nd.targetX) ** 2 + (y - nd.targetY) ** 2)
     );
@@ -2293,6 +2372,81 @@
       x: x - sumEX / sumW,
       y: y - sumEY / sumW,
     };
+  }
+
+  // ─── Validation croisée leave-one-out (score honnête) ───────────────────────
+  // Le champ de correction est construit sur les points de validation eux-mêmes ;
+  // mesurer l'erreur sur ces mêmes points est donc optimiste (on note sur le jeu
+  // d'entraînement). La LOO estime l'erreur de GÉNÉRALISATION : pour chaque point,
+  // on reconstruit le champ SANS lui, puis on mesure l'erreur résiduelle sur ce
+  // point exclu. C'est le vrai indicateur de qualité à reporter.
+  function computeLooError(predsByPoint) {
+    if (!Array.isArray(predsByPoint) || predsByPoint.length < 3) return null;
+    const errs = [];
+    for (let i = 0; i < predsByPoint.length; i++) {
+      const heldOut = predsByPoint[i];
+      const others  = predsByPoint.filter((_, k) => k !== i).map(p => ({
+        targetX: p.targetX, targetY: p.targetY,
+        errX: p.predX - p.targetX, errY: p.predY - p.targetY,
+      }));
+      const corrected = correctWithNodes(heldOut.predX, heldOut.predY, others);
+      errs.push(distance(corrected.x, corrected.y, heldOut.targetX, heldOut.targetY));
+    }
+    const filtered = removeOutliers1D(errs, CONFIG.OUTLIER_SIGMA);
+    const used = filtered.length ? filtered : errs;
+    return { meanError: mean(used), stdError: stdDev(used), n: used.length };
+  }
+
+  // Applique la même logique de correction qu'applySpatialCorrection mais sur un
+  // jeu de nœuds passé en paramètre (utilisé par la LOO et la correction live).
+  function correctWithNodes(x, y, nodes) {
+    if (!nodes || !nodes.length) return { x, y };
+    const EPS = 1e-6;
+    if (CONFIG.LOWESS_ENABLED) {
+      const dists = nodes.map(nd => Math.sqrt((x - nd.targetX) ** 2 + (y - nd.targetY) ** 2));
+      const h = Math.max(...dists, EPS) * (1 + CONFIG.LOWESS_BANDWIDTH);
+      let sumW = 0, sumEX = 0, sumEY = 0;
+      nodes.forEach((nd, i) => {
+        const u = dists[i] / h;
+        if (u >= 1) return;
+        const w = Math.pow(1 - Math.pow(u, 3), 3);
+        sumW += w; sumEX += w * nd.errX; sumEY += w * nd.errY;
+      });
+      if (sumW >= EPS) return { x: x - sumEX / sumW, y: y - sumEY / sumW };
+    }
+    // Repli IDW global
+    let sumW = 0, sumEX = 0, sumEY = 0;
+    for (const nd of nodes) {
+      const w = 1 / ((x - nd.targetX) ** 2 + (y - nd.targetY) ** 2 + EPS);
+      sumW += w; sumEX += w * nd.errX; sumEY += w * nd.errY;
+    }
+    return { x: x - sumEX / sumW, y: y - sumEY / sumW };
+  }
+
+  // ─── Correction spatiale unifiée ────────────────────────────────────────────
+  // IMPORTANT : on n'enchaîne PAS IDW puis LOWESS — les deux estiment le MÊME
+  // champ d'erreur résiduelle à partir des mêmes nœuds, donc les chaîner corrige
+  // deux fois la même erreur (sur-correction). On choisit un seul estimateur :
+  // LOWESS (tricubique, meilleur localement) avec repli sur IDW global pour les
+  // points hors de toute bande passante, ou repli quadrant si aucun nœud.
+  function applySpatialCorrection(x, y) {
+    // Compensation des mouvements de tête (appliquée AVANT la correction spatiale
+    // pour que le champ de correction reste évalué dans le repère de calibration).
+    const head = getHeadCompensation();
+    x += head.dx; y += head.dy;
+
+    if (idwNodes.length > 0) {
+      if (CONFIG.LOWESS_ENABLED) {
+        const lowess = applyLOWESS(x, y);
+        // applyLOWESS renvoie l'entrée inchangée quand aucun nœud n'est dans la
+        // bande passante ; dans ce cas on retombe sur IDW (support global).
+        if (lowess.x !== x || lowess.y !== y) return lowess;
+      }
+      return applyIDWCorrection(x, y);
+    }
+    // Avant tout champ de correction : biais global + quadrant
+    const q = getQuadrant(x, y);
+    return { x: x - biasX - quadrantBias[q].x, y: y - biasY - quadrantBias[q].y };
   }
 
   // ─── Affichage du score final ──────────────────────────────────────────────
@@ -2438,6 +2592,10 @@
           <td style="padding:7px 14px;text-align:left;color:#aaa;">Écart-type</td>
           <td style="padding:7px 14px;text-align:right;font-weight:bold;">${score.stdError.toFixed(1)} px</td>
         </tr>
+        ${typeof score.looError === 'number' ? `<tr>
+          <td style="padding:7px 14px;text-align:left;color:#aaa;" title="Erreur de généralisation estimée par validation croisée leave-one-out — plus réaliste que l'erreur sur les points de validation eux-mêmes">Erreur corrigée (LOO) ⓘ</td>
+          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${score.looError > CONFIG.RECALIBRATION_THRESHOLD ? '#e74c3c' : '#27ae60'};">${score.looError.toFixed(1)} px</td>
+        </tr>` : ''}
         ${qualityRows}
         <tr><td colspan="2" style="padding:6px 14px;color:#4ecdc4;font-size:.8rem;text-align:left;">— Précision par quadrant —</td></tr>
         ${qRows}
@@ -2534,6 +2692,7 @@
         timestamp:      new Date().toISOString(),
         meanError:      score.meanError,
         stdError:       score.stdError,
+        looError:       typeof score.looError === 'number' ? score.looError : null,
         quadrantErrors: score.quadrantErrors || null,
         quality:        score.quality || null,
         threshold:      CONFIG.RECALIBRATION_THRESHOLD,
@@ -2724,16 +2883,26 @@
 
     // Appliquer la correction de biais à une prédiction externe
     applyBiasCorrection(x, y) {
-      if (idwNodes.length > 0) {
-        const idw = applyIDWCorrection(x, y);
-        return applyLOWESS(idw.x, idw.y);
-      }
-      const q = getQuadrant(x, y);
-      return {
-        x: x - biasX - quadrantBias[q].x,
-        y: y - biasY - quadrantBias[q].y,
-      };
+      return applySpatialCorrection(x, y);
     },
+
+    // Pipeline temps réel complet pour la démo : One Euro (lissage temporel) PUIS
+    // correction spatiale. À utiliser dans le gazeListener de la page hôte à la
+    // place d'applyBiasCorrection seul, qui ne lisse pas et laisse passer le
+    // tremblement frame-à-frame de WebGazer.
+    smoothPrediction(x, y, ts) {
+      if (x == null || y == null || !Number.isFinite(x) || !Number.isFinite(y)) return null;
+      const t = Number.isFinite(ts) ? ts : Date.now();
+      const oe = runtimeOneEuro.filter(x, y, t);
+      return applySpatialCorrection(oe.x, oe.y);
+    },
+
+    resetSmoothing() { runtimeOneEuro.reset(); },
+
+    // Mémorise la posture de tête actuelle comme référence de compensation.
+    // À appeler quand l'utilisateur est bien positionné (ex. au début de la démo).
+    captureHeadReference,
+    getHeadCompensation,
 
     getDriftScore,
     startMicroRecalibration,
@@ -2748,7 +2917,7 @@
     CONFIG,
     CALIBRATION_GRID,
     VALIDATION_GRID,
-    _helpers: { distance, mean, stdDev, median, pxFromPct, getSafeScreenPoint, removeOutliers, medianFilterPoints, percentInROI, samplesPerSecond, summarizeValidationQuality, getQuadrant, detectFixations, detectSaccades, linkEvents, checkStability, applyIDWCorrection, applyLOWESS, computeIDWField, injectSyntheticCalibrationData },
+    _helpers: { distance, mean, stdDev, median, pxFromPct, getSafeScreenPoint, removeOutliers, removeOutliers1D, medianFilterPoints, percentInROI, samplesPerSecond, summarizeValidationQuality, getQuadrant, detectFixations, detectSaccades, linkEvents, checkStability, applyIDWCorrection, applyLOWESS, applySpatialCorrection, correctWithNodes, computeLooError, computeIDWField, injectSyntheticCalibrationData },
     _kalman: KalmanFilter,
     _oneEuro: OneEuroFilter,
     _internal: {
