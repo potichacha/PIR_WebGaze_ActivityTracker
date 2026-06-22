@@ -1046,9 +1046,11 @@ function _gazeListener(data) {
     }
     return;
   }
-  var corrected = Calibration.applyBiasCorrection(data.x, data.y);
-  var x = corrected.x, y = corrected.y;
   var ts = Date.now();
+  // Pipeline temps réel : lissage One Euro + correction spatiale (un seul appel).
+  var corrected = Calibration.smoothPrediction(data.x, data.y, ts);
+  if (!corrected) return;
+  var x = corrected.x, y = corrected.y;
   _lastGaze = { x: x, y: y };
   gazeCursor.style.left = x + 'px';
   gazeCursor.style.top  = y + 'px';
@@ -1098,6 +1100,10 @@ async function _startGaze() {
     // Réinjecter les données d'entraînement depuis localStorage
     Calibration.restoreTrainingData();
 
+    Calibration.resetSmoothing();
+    // Capturer la posture de tête de référence une fois le tracker stabilisé,
+    // pour activer la compensation des mouvements de tête pendant la démo.
+    setTimeout(function () { Calibration.captureHeadReference(); }, 1500);
     webgazer.setGazeListener(_gazeListener);
     gazeCursor.style.display = 'block';
     _gazeModeOn = true;

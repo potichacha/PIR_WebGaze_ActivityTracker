@@ -31,6 +31,38 @@
     return 'Unknown';
   }
 
+  // Version du module de calibration (si chargé).
+  function _calibrationVersion() {
+    try {
+      if (typeof global.Calibration !== 'undefined' && global.Calibration.CONFIG) {
+        return global.Calibration.CONFIG.VERSION || null;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  // Instantané des paramètres de filtrage/correction qui influencent les données.
+  function _configSnapshot() {
+    try {
+      if (typeof global.Calibration === 'undefined' || !global.Calibration.CONFIG) return null;
+      var c = global.Calibration.CONFIG;
+      return {
+        clicks_per_point:          c.CLICKS_PER_POINT,
+        recalibration_threshold:   c.RECALIBRATION_THRESHOLD,
+        one_euro_min_cutoff:       c.ONE_EURO_MIN_CUTOFF,
+        one_euro_beta:             c.ONE_EURO_BETA,
+        one_euro_d_cutoff:         c.ONE_EURO_D_CUTOFF,
+        ridge_parameter:           c.RIDGE_PARAMETER,
+        lowess_enabled:            c.LOWESS_ENABLED,
+        lowess_bandwidth:          c.LOWESS_BANDWIDTH,
+        bilinear_enabled:          c.BILINEAR_ENABLED,
+        synth_enabled:             c.SYNTH_ENABLED,
+        head_compensation_enabled: c.HEAD_COMPENSATION_ENABLED,
+        head_comp_gain:            c.HEAD_COMP_GAIN,
+      };
+    } catch (_) { return null; }
+  }
+
   // ─── État interne ────────────────────────────────────────────────────────────
   var _session     = null;
   var _rawGaze     = [];
@@ -58,8 +90,15 @@
           width:  window.innerWidth,
           height: window.innerHeight,
         },
+        device_pixel_ratio: (typeof window !== 'undefined' && window.devicePixelRatio) || 1,
+        user_agent:        typeof navigator !== 'undefined' ? navigator.userAgent : null,
         browser:           _browserName(),
         calibration_score: calibrationScore || null,
+        // Reproductibilité : version du module et instantané de la config de
+        // filtrage/correction utilisée pendant la session. Sans cela, impossible
+        // de rejouer ou comparer deux sessions a posteriori.
+        calibration_version: _calibrationVersion(),
+        config_snapshot:     _configSnapshot(),
       };
     },
 
@@ -117,7 +156,10 @@
           id: _uuid(), participant_id: 'anonymous',
           start_time: new Date().toISOString(), end_time: new Date().toISOString(),
           screen_resolution: { width: window.innerWidth, height: window.innerHeight },
+          device_pixel_ratio: (typeof window !== 'undefined' && window.devicePixelRatio) || 1,
+          user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
           browser: _browserName(), calibration_score: null,
+          calibration_version: _calibrationVersion(), config_snapshot: _configSnapshot(),
         },
         raw_gaze_data: _rawGaze.slice(),
         events:        _events.slice(),

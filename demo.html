@@ -383,7 +383,8 @@
       }
       return;
     }
-    const corrected = Calibration.applyBiasCorrection(data.x, data.y);
+    const corrected = Calibration.smoothPrediction(data.x, data.y, Date.now());
+    if (!corrected) return;
     const x = corrected.x;
     const y = corrected.y;
 
@@ -424,6 +425,8 @@
       // (IndexedDB via saveDataAcrossSessions n'est pas fiable entre pages)
       Calibration.restoreTrainingData();
 
+      Calibration.resetSmoothing();
+      setTimeout(function () { Calibration.captureHeadReference(); }, 1500);
       webgazer.setGazeListener(_gazeListener);
       gazeCursor.style.display = 'block';
       _gazeModeOn = true;
