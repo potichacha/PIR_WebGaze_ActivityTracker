@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebGaze — Moteur MediaPipe</title>
+
+  <!-- D3 pour les visualisations -->
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+
+  <link rel="stylesheet" href="src/barchart/barchart.css" />
+  <link rel="stylesheet" href="src/linechart/linechart.css" />
+  <link rel="stylesheet" href="src/scatterchart/scatterchart.css" />
+
+  <style>
+    :root { --bg:#0f0f1a; --panel:#16213e; --accent:#6c8cff; --accent2:#4ecdc4; --text:#eee; --muted:#9aa6c0; }
+    * { box-sizing: border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:'Segoe UI',Arial,sans-serif; }
+    header { padding:14px 22px; display:flex; align-items:center; gap:16px; border-bottom:1px solid rgba(120,140,200,0.18); }
+    header h1 { font-size:1.1rem; margin:0; }
+    header .engine { font-size:0.75rem; background:rgba(108,140,255,0.15); color:var(--accent); padding:3px 10px; border-radius:999px; font-weight:700; }
+    header a { margin-left:auto; color:var(--muted); font-size:0.85rem; text-decoration:none; }
+    header a:hover { color:var(--accent); }
+    .bar { display:flex; gap:10px; align-items:center; padding:12px 22px; flex-wrap:wrap; border-bottom:1px solid rgba(120,140,200,0.12); }
+    button { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:9px 16px; font-size:0.9rem; cursor:pointer; font-weight:600; }
+    button.ghost { background:transparent; border:1px solid rgba(120,140,200,0.4); color:var(--text); }
+    button:disabled { opacity:0.45; cursor:not-allowed; }
+    #status { font-size:0.85rem; color:var(--muted); margin-left:8px; }
+    #demo-nav { display:flex; gap:8px; padding:14px 22px 0; }
+    #demo-nav button { background:transparent; border:1px solid rgba(120,140,200,0.3); color:var(--muted); }
+    #demo-nav button.active { background:var(--accent2); color:#0f0f1a; border-color:transparent; }
+    .chart-area { padding:18px 22px; min-height:60vh; }
+    .tab-panel { display:none; } .tab-panel.active { display:block; }
+    /* overlay calibration MediaPipe */
+    #mp-overlay { position:fixed; inset:0; background:#1a1a2e; z-index:9999; display:none; cursor:crosshair; }
+    #mp-overlay.on { display:block; }
+    .mp-title { position:absolute; top:18px; left:50%; transform:translateX(-50%); text-align:center; }
+    .mp-title h2 { margin:0; font-size:1.2rem; } .mp-title p { margin:4px 0 0; color:var(--muted); font-size:0.85rem; }
+    .mp-point { position:absolute; width:28px; height:28px; border-radius:50%; background:#e74c3c; border:3px solid #fff;
+      transform:translate(-50%,-50%); cursor:pointer; display:flex; align-items:center; justify-content:center;
+      color:#fff; font-size:10px; font-weight:700; }
+    #mp-mirror { position:fixed; bottom:16px; left:16px; width:160px; border-radius:12px; overflow:hidden;
+      border:2px solid var(--accent); z-index:10000; }
+    #mp-mirror video { width:160px; height:120px; display:block; transform:scaleX(-1); object-fit:cover; }
+    #gaze-cursor { position:fixed; width:24px; height:24px; border-radius:50%; border:2px solid var(--accent2);
+      background:rgba(78,205,196,0.15); transform:translate(-50%,-50%); pointer-events:none; z-index:9000; display:none; }
+    .note { padding:0 22px 18px; color:var(--muted); font-size:0.82rem; max-width:760px; line-height:1.6; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>WebGaze Activity Tracker</h1>
+    <span class="engine">Moteur : MediaPipe FaceLandmarker</span>
+    <a href="choose.html">← Changer de moteur</a>
+  </header>
+
+  <div class="bar">
+    <button id="btn-calibrate">1 · Calibrer</button>
+    <button id="btn-start" disabled>2 · Démarrer le suivi</button>
+    <button id="btn-stop" class="ghost" disabled>■ Arrêter</button>
+    <button id="btn-export" class="ghost" disabled>Export JSON + JSON-LD</button>
+    <span id="status">Modèle non chargé.</span>
+  </div>
+
+  <p class="note">
+    MediaPipe ne fournit pas directement un point de regard : la calibration apprend
+    une régression <em>features iris + pose de tête → écran</em>. Cliquez sur chaque
+    point en le fixant. La compensation des mouvements de tête est intégrée nativement.
+  </p>
+
+  <nav id="demo-nav">
+    <button class="active" data-tab="tab-barchart">Bar Chart</button>
+    <button data-tab="tab-linechart">Line Chart</button>
+    <button data-tab="tab-scatter">Scatter Plot</button>
+  </nav>
+  <div class="chart-area">
+    <div id="tab-barchart" class="tab-panel active"><div id="bar-chart-container"></div></div>
+    <div id="tab-linechart" class="tab-panel"><div id="line-chart-container"></div></div>
+    <div id="tab-scatter"   class="tab-panel"><div id="scatter-chart-container"></div></div>
+  </div>
+
+  <div id="gaze-cursor"></div>
+
+  <!-- Overlay de calibration MediaPipe -->
+  <div id="mp-overlay">
+    <div class="mp-title"><h2 id="mp-h">Calibration MediaPipe</h2><p id="mp-sub"></p></div>
+  </div>
+  <div id="mp-mirror" style="display:none;"><video id="mp-video" autoplay playsinline muted></video></div>
+
+  <!-- Modules partagés (logique d'analyse indépendante du moteur) -->
+  <script src="src/calibration/calibration.js?v=mp"></script>
+  <script src="src/logger/gaze-logger.js"></script>
+  <script src="src/barchart/barchart.js"></script>
+  <script src="src/linechart/linechart.js"></script>
+  <script src="src/scatterchart/scatterchart.js"></script>
+  <script src="src/gaze-engine/mediapipe-engine.js"></script>
+
+  <!-- Bundle MediaPipe tasks-vision (ES module) exposé en global -->
+  <script type="module">
+    import { FilesetResolver, FaceLandmarker }
+      from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs';
+    window.MediaPipeVision = { FilesetResolver, FaceLandmarker };
+    window.dispatchEvent(new Event('mediapipe-ready'));
+  </script>
+
+  <script>
+  (function () {
+    'use strict';
+    var Engine = window.MediaPipeEngine;
+    var statusEl = document.getElementById('status');
+    var overlay  = document.getElementById('mp-overlay');
+    var cursor   = document.getElementById('gaze-cursor');
+    var mirror   = document.getElementById('mp-mirror');
+
+    var _activeChart = null;
+    var _gazeOn = false;
+    var _mpReady = false;
+
+    // Grille de calibration : on réutilise celle du module Calibration (cohérence).
+    var GRID = window.Calibration.CALIBRATION_GRID;
+    var VALID = window.Calibration.VALIDATION_GRID;
+    var CLICKS = 5;
+
+    function setStatus(txt, color) { statusEl.textContent = txt; if (color) statusEl.style.color = color; }
+
+    window.addEventListener('mediapipe-ready', function () { _mpReady = true; });
+
+    // ── Init charts ──
+    BarChart.init('bar-chart-container');
+    document.querySelectorAll('#demo-nav button').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        document.querySelectorAll('#demo-nav button').forEach(function (b){ b.classList.remove('active'); });
+        document.querySelectorAll('.tab-panel').forEach(function (p){ p.classList.remove('active'); });
+        btn.classList.add('active');
+        document.getElementById(btn.dataset.tab).classList.add('active');
+        if (window.GazeLogger.isInitialized()) GazeLogger.logInteraction('tab_change', { tab: btn.dataset.tab });
+        [BarChart, LineChart, ScatterChart].forEach(function (c){ c.setGazeMode(false); });
+        if (btn.dataset.tab === 'tab-barchart') { BarChart.init('bar-chart-container'); _activeChart = BarChart; }
+        else if (btn.dataset.tab === 'tab-linechart') { LineChart.init('line-chart-container'); _activeChart = LineChart; }
+        else { ScatterChart.init('scatter-chart-container'); _activeChart = ScatterChart; }
+        if (_gazeOn) _activeChart.setGazeMode(true);
+      });
+    });
+    _activeChart = BarChart;
+
+    var _session = null; // données participant
+
+    // ── Calibration : formulaire → positionnement → calibration → validation ──
+    document.getElementById('btn-calibrate').addEventListener('click', function () {
+      showParticipantForm(function (session) {
+        _session = session;
+        startEngineThenPosition();
+      });
+    });
+
+    async function startEngineThenPosition() {
+      if (!_mpReady) setStatus('Chargement du modèle MediaPipe…', '#e0a96a');
+      try {
+        setStatus('Initialisation MediaPipe…', '#e0a96a');
+        await Engine.init();
+        await Engine.start();
+        Engine.clearCalibration();
+        mirror.style.display = 'block';
+        showPositioning(function () {
+          setStatus('Calibration en cours…', '#4ecdc4');
+          runCalibration();
+        });
+      } catch (err) {
+        setStatus('Erreur : ' + (err.message || err), '#e74c3c');
+      }
+    }
+
+    // ── Formulaire participant (overlay) ──
+    function showParticipantForm(onDone) {
+      overlay.classList.add('on');
+      document.getElementById('mp-h').textContent = 'Informations participant';
+      document.getElementById('mp-sub').textContent = 'Remplissez avant de commencer';
+      var box = document.createElement('div');
+      box.className = 'mp-form';
+      box.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);'
+        + 'background:#16213e;border-radius:14px;padding:28px 34px;width:90%;max-width:460px;color:#eee;';
+      var inp = 'width:100%;background:#0d1b2a;border:1px solid #2c3e50;border-radius:8px;color:#eee;padding:9px 12px;margin-bottom:14px;box-sizing:border-box;';
+      box.innerHTML =
+        '<h3 style="margin:0 0 18px;color:#6c8cff;">Session — données participant</h3>'
+        + '<label style="font-size:.82rem;color:#9aa6c0;">ID participant *</label>'
+        + '<input id="f-pid" placeholder="P01…" style="' + inp + '" />'
+        + '<label style="font-size:.82rem;color:#9aa6c0;">Âge</label>'
+        + '<input id="f-age" type="number" min="16" max="90" style="' + inp + '" />'
+        + '<label style="font-size:.82rem;color:#9aa6c0;">Lunettes / lentilles</label>'
+        + '<select id="f-glasses" style="' + inp + '"><option value="non">Non</option>'
+        + '<option value="lunettes">Lunettes</option><option value="lentilles">Lentilles</option></select>'
+        + '<label style="font-size:.82rem;color:#9aa6c0;">Éclairage</label>'
+        + '<select id="f-light" style="' + inp + '"><option value="normal">Normal</option>'
+        + '<option value="sombre">Sombre</option><option value="lumineux">Lumineux</option><option value="contre-jour">Contre-jour</option></select>'
+        + '<div id="f-err" style="color:#e74c3c;font-size:.82rem;margin-bottom:10px;display:none;">L\'ID est obligatoire.</div>'
+        + '<button id="f-go" style="background:#6c8cff;color:#fff;border:none;border-radius:8px;padding:11px 18px;font-weight:700;width:100%;cursor:pointer;">Continuer →</button>';
+      overlay.appendChild(box);
+      document.getElementById('f-go').addEventListener('click', function () {
+        var pid = document.getElementById('f-pid').value.trim();
+        if (!pid) { document.getElementById('f-err').style.display = 'block'; return; }
+        var session = {
+          participant_id: pid,
+          date: new Date().toISOString().slice(0,10),
+          age: document.getElementById('f-age').value || null,
+          glasses: document.getElementById('f-glasses').value,
+          lighting: document.getElementById('f-light').value,
+          engine: 'mediapipe',
+          screen_resolution: (typeof screen !== 'undefined') ? screen.width + 'x' + screen.height : null,
+        };
+        box.remove(); overlay.classList.remove('on');
+        onDone(session);
+      });
+    }
+
+    // ── Écran de positionnement ──
+    function showPositioning(onReady) {
+      overlay.classList.add('on');
+      document.getElementById('mp-h').textContent = 'Positionnement';
+      document.getElementById('mp-sub').textContent = 'Centrez votre visage, ~60 cm de l\'écran, bon éclairage';
+      var box = document.createElement('div');
+      box.className = 'mp-form';
+      box.style.cssText = 'position:absolute;top:55%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#eee;';
+      box.innerHTML =
+        '<p style="color:#9aa6c0;max-width:420px;line-height:1.7;">Le retour caméra est visible en bas à gauche. '
+        + 'Assurez-vous que votre visage est bien éclairé et détecté, puis démarrez.</p>'
+        + '<button id="p-go" style="background:#4ecdc4;color:#0f0f1a;border:none;border-radius:8px;padding:12px 22px;font-weight:700;cursor:pointer;">Je suis prêt — Démarrer →</button>';
+      overlay.appendChild(box);
+      document.getElementById('p-go').addEventListener('click', function () {
+        box.remove();
+        onReady();
+      });
+    }
+
+    function px(p) {
+      var W = window.innerWidth, H = window.innerHeight;
+      var mx = 70, mtop = 110, mbot = 80;
+      return {
+        x: Math.round(mx + (p.xPct/100) * (W - 2*mx)),
+        y: Math.round(mtop + (p.yPct/100) * (H - mtop - mbot)),
+      };
+    }
+
+    function runCalibration() {
+      overlay.classList.add('on');
+      var order = GRID.map(function (p){ return p; }).sort(function (){ return Math.random()-0.5; });
+      var idx = 0;
+      document.getElementById('mp-h').textContent = 'Calibration MediaPipe';
+
+      function next() {
+        var old = overlay.querySelector('.mp-point'); if (old) old.remove();
+        if (idx >= order.length) { finishCalibration(); return; }
+        var pt = px(order[idx]);
+        document.getElementById('mp-sub').textContent =
+          'Point ' + (idx+1) + ' / ' + order.length + ' — fixez et cliquez ' + CLICKS + ' fois';
+        var dot = document.createElement('div');
+        dot.className = 'mp-point';
+        dot.style.left = pt.x + 'px'; dot.style.top = pt.y + 'px';
+        var clicks = 0; dot.textContent = '0/' + CLICKS;
+        dot.addEventListener('click', function (e) {
+          e.stopPropagation();
+          // Enregistre un échantillon FILTRÉ (moyenné sur une fenêtre de frames,
+          // rejet des clignements/instabilités). Peut échouer → on redemande un clic.
+          var ok = Engine.recordCalibrationSample(pt.x, pt.y);
+          if (ok) {
+            clicks++; dot.textContent = clicks + '/' + CLICKS;
+            dot.style.background = '#27ae60';
+            setTimeout(function (){ if (clicks < CLICKS) dot.style.background = '#e74c3c'; }, 150);
+          } else {
+            // Qualité insuffisante : feedback visuel, le clic ne compte pas.
+            dot.style.background = '#e67e22';
+            document.getElementById('mp-sub').textContent =
+              'Point ' + (idx+1) + ' / ' + order.length + ' — gardez les yeux ouverts et fixez le point';
+            setTimeout(function (){ dot.style.background = '#e74c3c'; }, 250);
+          }
+          if (clicks >= CLICKS) { idx++; setTimeout(next, 150); }
+        });
+        overlay.appendChild(dot);
+      }
+      next();
+    }
+
+    function finishCalibration() {
+      var trained = Engine.trainFromSamples();
+      overlay.classList.remove('on');
+      if (!trained) {
+        setStatus('Calibration insuffisante (' + Engine.getSampleCount() + ' échantillons). Réessayez.', '#e74c3c');
+        return;
+      }
+      // Validation rapide : erreur moyenne sur la grille de validation.
+      runValidation();
+    }
+
+    function runValidation() {
+      overlay.classList.add('on');
+      document.getElementById('mp-h').textContent = 'Validation';
+      var order = VALID.slice();
+      var idx = 0; var errors = []; var perPoint = [];
+
+      function next() {
+        var old = overlay.querySelector('.mp-point'); if (old) old.remove();
+        if (idx >= order.length) {
+          overlay.classList.remove('on');
+          finishValidation(errors, perPoint);
+          return;
+        }
+        var pt = px(order[idx]);
+        document.getElementById('mp-sub').textContent = 'Fixez le point ' + (idx+1) + ' / ' + order.length;
+        var dot = document.createElement('div');
+        dot.className = 'mp-point'; dot.style.background = '#e67e22';
+        dot.style.left = pt.x + 'px'; dot.style.top = pt.y + 'px';
+        overlay.appendChild(dot);
+        // Collecte 1.2 s, mesure l'erreur BRUTE (correction encore vide), puis
+        // enregistre le résidu pour construire le champ de correction [#5].
+        Engine.clearCorrectionField();
+        var samples = [];
+        var cb = function (g){ samples.push(g); };
+        Engine.onGaze(cb);
+        setTimeout(function () {
+          Engine.offGaze(cb);
+          if (samples.length) {
+            var mx = samples.reduce(function (a,s){ return a+s.x; },0)/samples.length;
+            var my = samples.reduce(function (a,s){ return a+s.y; },0)/samples.length;
+            var err = Math.hypot(mx-pt.x, my-pt.y);
+            errors.push(err);
+            perPoint.push({ err: err, predX: mx, predY: my, targetX: pt.x, targetY: pt.y });
+          } else { errors.push(9999); perPoint.push({ err: 9999, predX: pt.x, predY: pt.y, targetX: pt.x, targetY: pt.y }); }
+          idx++; next();
+        }, 1200);
+      }
+      next();
+    }
+
+    function finishValidation(errors, perPoint) {
+      var H = window.Calibration._helpers;
+      var clean = H.removeOutliers1D(errors, 2);
+      var used = clean.length ? clean : errors;
+      var mean = H.mean(used), std = H.stdDev(used);
+
+      // Erreur par quadrant (réutilise getQuadrant du module Calibration).
+      var quads = { topLeft:[], topRight:[], bottomLeft:[], bottomRight:[] };
+      perPoint.forEach(function (p){ quads[H.getQuadrant(p.targetX, p.targetY)].push(p.err); });
+      var qErr = {};
+      Object.keys(quads).forEach(function (q){ qErr[q] = quads[q].length ? H.mean(quads[q]) : null; });
+
+      // [#5] Construire le champ de correction résiduelle à partir des points de
+      // validation, puis estimer l'erreur de généralisation par leave-one-out.
+      Engine.clearCorrectionField();
+      perPoint.forEach(function (p){ Engine.addValidationResidual(p.predX, p.predY, p.targetX, p.targetY); });
+
+      var looErrs = [];
+      perPoint.forEach(function (held, i){
+        var nodes = perPoint.filter(function (_, k){ return k !== i; })
+          .map(function (p){ return { tx:p.targetX, ty:p.targetY, ex:p.predX-p.targetX, ey:p.predY-p.targetY }; });
+        var c = Engine._math.lowessCorrect(held.predX, held.predY, nodes, Engine.CONFIG.LOWESS_BANDWIDTH);
+        if (c.x === held.predX && c.y === held.predY) c = Engine._math.idwCorrect(held.predX, held.predY, nodes);
+        looErrs.push(Math.hypot(c.x - held.targetX, c.y - held.targetY));
+      });
+      var looClean = H.removeOutliers1D(looErrs, 2);
+      var looMean = H.mean(looClean.length ? looClean : looErrs);
+
+      // Persister le profil complet (poids + standardizer + champ de correction).
+      Engine.saveProfile({ meanError: mean, stdError: std, looError: looMean, quadrantErrors: qErr, session: _session });
+
+      var ok = looMean < 250;
+      var qTxt = Object.keys(qErr).map(function (q){ return q + ':' + (qErr[q]!=null?Math.round(qErr[q]):'—'); }).join('  ');
+      var lam = Engine.getLambda ? Engine.getLambda() : null;
+      setStatus((ok ? '✓ Calibration OK' : '⚠️ Calibration limite')
+        + ' — brut ' + mean.toFixed(0) + '±' + std.toFixed(0)
+        + ' px · corrigé (LOO) ' + looMean.toFixed(0) + ' px'
+        + (lam != null ? ' · λ=' + lam.toExponential(1) : '')
+        + '  [' + qTxt + ']  ·  Ctrl+clic pour affiner en continu', ok ? '#4ecdc4' : '#e0a96a');
+      document.getElementById('btn-start').disabled = false;
+    }
+
+    // ── Dwell / AOI (porté de index.html, identique au moteur WebGazer) ──────────
+    var DWELL_MS = 700, GRACE_MS = 250;
+    var _dwell = { aoiId: null, startedAt: null, graceTimer: null };
+
+    function _getInteractiveAOIs() {
+      if (!_activeChart) return [];
+      if (_activeChart === BarChart)     return BarChart.getAOIs().filter(function (a){ return a.id.indexOf('bar-') === 0; });
+      if (_activeChart === LineChart)    return LineChart.getAOIs().filter(function (a){ return a.id.indexOf('col-') === 0; });
+      if (_activeChart === ScatterChart) return ScatterChart.getAOIs().filter(function (a){ return a.id.indexOf('point-') === 0; });
+      return [];
+    }
+    function _resetDwell() {
+      if (_dwell.graceTimer) { clearTimeout(_dwell.graceTimer); _dwell.graceTimer = null; }
+      if (_activeChart) { _activeChart.gazeLeave(); _activeChart.gazeDwelling(null, 0); }
+      _dwell = { aoiId: null, startedAt: null, graceTimer: null };
+    }
+    function _onAOIEnter(aoiId, x, y) {
+      if (_dwell.graceTimer) { clearTimeout(_dwell.graceTimer); _dwell.graceTimer = null; }
+      if (_dwell.aoiId === aoiId) return;
+      _resetDwell();
+      _dwell.aoiId = aoiId; _dwell.startedAt = Date.now();
+      if (window.GazeLogger.isInitialized())
+        GazeLogger.logInteraction('gaze_enter_aoi', { aoi_id: aoiId, x: Math.round(x), y: Math.round(y) });
+      if (_activeChart) _activeChart.gazeHover(aoiId, x, y);
+    }
+    function _onAOILeave() {
+      if (!_dwell.aoiId) return;
+      _dwell.graceTimer = setTimeout(_resetDwell, GRACE_MS);
+    }
+    function _tickDwell(x, y) {
+      if (!_dwell.aoiId || !_activeChart) return;
+      var progress = Math.min((Date.now() - _dwell.startedAt) / DWELL_MS, 1);
+      _activeChart.gazeDwelling(_dwell.aoiId, progress);
+      _activeChart.gazeHover(_dwell.aoiId, x, y);
+    }
+
+    // ── Suivi (démo) ──
+    function onGaze(g) {
+      // Lissage temporel réutilisé du module Calibration (One Euro, indépendant du moteur).
+      var c = window.Calibration.smoothPrediction ? window.Calibration.smoothPrediction(g.x, g.y, g.timestamp) : g;
+      if (!c) return;
+      cursor.style.display = 'block';
+      cursor.style.left = c.x + 'px'; cursor.style.top = c.y + 'px';
+      if (window.GazeLogger.isInitialized()) GazeLogger.logRawPoint(c.x, c.y, g.timestamp);
+
+      // Interaction regard ↔ zones d'intérêt de la visualisation active
+      var aois = _getInteractiveAOIs();
+      var hit = aois.find(function (a){ return c.x >= a.x && c.x <= a.x + a.width && c.y >= a.y && c.y <= a.y + a.height; });
+      if (hit) _onAOIEnter(hit.id, c.x, c.y); else _onAOILeave();
+      _tickDwell(c.x, c.y);
+    }
+
+    // [#3bis] Apprentissage continu : Ctrl/⌘ + clic pendant le suivi ajoute la
+    // position cliquée comme nouvel échantillon (le regard est supposé y être) et
+    // ré-entraîne le modèle pour corriger la dérive sans recalibration complète.
+    document.addEventListener('click', function (ev) {
+      if (!_gazeOn) return;
+      if (!ev.ctrlKey && !ev.metaKey) return;
+      var ok = Engine.addOnlineSample(ev.clientX, ev.clientY);
+      if (window.GazeLogger.isInitialized())
+        GazeLogger.logInteraction('online_recalibration', { x: ev.clientX, y: ev.clientY, applied: !!ok });
+      setStatus(ok ? '↻ Modèle affiné (Ctrl+clic) — λ=' + (Engine.getLambda()||0).toExponential(1)
+                   : '↻ Échantillon rejeté (qualité). Réessayez en fixant le curseur.',
+        ok ? '#4ecdc4' : '#e0a96a');
+    }, true);
+
+    document.getElementById('btn-start').addEventListener('click', async function () {
+      var btn = this;
+      if (!Engine.isTrained()) { setStatus('Calibrez d\'abord (aucun modèle entraîné).', '#e74c3c'); return; }
+      btn.disabled = true;
+      try {
+        // Démarrage direct depuis un profil mémorisé : la caméra n'est pas encore active.
+        if (Engine.getStatus() !== 'running') {
+          setStatus('Démarrage caméra…', '#e0a96a');
+          await Engine.start();
+          mirror.style.display = 'block';
+        }
+      } catch (err) {
+        setStatus('Erreur caméra : ' + (err.message || err), '#e74c3c'); btn.disabled = false; return;
+      }
+      var stored = Engine.getStoredProfile();
+      var pid = (_session && _session.participant_id) || 'participant-mediapipe';
+      var calScore = stored && stored.meta ? { mean_error_px: stored.meta.meanError, std_error_px: stored.meta.stdError || null } : null;
+      window.GazeLogger.init(pid, calScore);
+      GazeLogger.logInteraction('session_start', { engine: 'mediapipe', participant: _session || null });
+      if (window.Calibration.resetSmoothing) Calibration.resetSmoothing();
+      Engine.onGaze(onGaze);
+      _gazeOn = true;
+      if (_activeChart) _activeChart.setGazeMode(true);
+      document.getElementById('btn-stop').disabled = false;
+      document.getElementById('btn-export').disabled = false;
+      setStatus('Suivi du regard actif.', '#4ecdc4');
+    });
+
+    document.getElementById('btn-stop').addEventListener('click', function () {
+      Engine.offGaze(onGaze);
+      if (window.GazeLogger.isInitialized()) GazeLogger.logInteraction('session_stop', { engine: 'mediapipe' });
+      _gazeOn = false; cursor.style.display = 'none';
+      _resetDwell();
+      [BarChart, LineChart, ScatterChart].forEach(function (c){ c.setGazeMode(false); });
+      // Post-traitement (mêmes algos que WebGazer) : fixations, saccades, hits AOI.
+      var raw = GazeLogger.export().raw_gaze_data;
+      if (raw.length >= 10) {
+        var fixations = Calibration.detectFixations(raw, 80, 100);
+        var saccades  = Calibration.detectSaccades(raw, 0.7);
+        fixations.forEach(function (f){
+          GazeLogger.logEvent({ type:'fixation', start_time:f.start_time, end_time:f.end_time,
+            duration:f.duration, details:{ x:f.x_center, y:f.y_center, points_count:f.points_count } });
+        });
+        saccades.forEach(function (s){
+          GazeLogger.logEvent({ type:'saccade', start_time:s.start_time, end_time:s.end_time,
+            duration:s.duration, details:{ amplitude:s.amplitude, peak_velocity:s.peak_velocity } });
+        });
+        // Associer chaque fixation à la zone d'intérêt la plus proche (toutes vues confondues).
+        var allAOIs = BarChart.getAOIs().concat(LineChart.getAOIs(), ScatterChart.getAOIs());
+        fixations.forEach(function (f, i){
+          var hit = allAOIs.find(function (a){
+            return f.x_center >= a.x && f.x_center <= a.x + a.width &&
+                   f.y_center >= a.y && f.y_center <= a.y + a.height;
+          });
+          if (hit) GazeLogger.logAOIHit(hit.id, hit.label || '', i, f.start_time);
+        });
+      }
+      var st = GazeLogger.getStats();
+      setStatus('Arrêté — ' + st.fixations + ' fixations, ' + st.saccades + ' saccades, ' + st.aoiHits + ' AOI.', '#9aa6c0');
+      document.getElementById('btn-stop').disabled = true;
+    });
+
+    document.getElementById('btn-export').addEventListener('click', function () {
+      if (!window.GazeLogger.isInitialized()) return;
+      GazeLogger.logInteraction('export', { formats:['json','jsonld'], engine:'mediapipe' });
+      GazeLogger.download();
+      GazeLogger.downloadJsonLd();
+    });
+
+    // Profil de calibration mémorisé ? On le recharge et on autorise le suivi direct.
+    if (Engine.getStoredProfile && Engine.getStoredProfile()) {
+      var prof = Engine.getStoredProfile();
+      Engine.loadProfile();
+      var when = prof.timestamp ? prof.timestamp.slice(0,10) : '';
+      if (prof.meta && prof.meta.session) _session = prof.meta.session;
+      document.getElementById('btn-start').disabled = false; // suivi direct possible
+      setStatus('Profil de calibration trouvé (' + when + '). Démarrez le suivi, ou recalibrez.', '#9aa6c0');
+    } else {
+      setStatus(_mpReady ? 'Prêt — cliquez « Calibrer ».' : 'Chargement du module MediaPipe…');
+    }
+  })();
+  </script>
+</body>
+</html>

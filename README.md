@@ -46,11 +46,21 @@ python -m http.server 8080
 npx http-server -p 8080
 ```
 
-Puis ouvrir **http://localhost:8080/index.html** dans Chrome (plein écran `F11`
-recommandé), autoriser la webcam, et suivre le parcours :
+Puis ouvrir **http://localhost:8080/choose.html** dans Chrome (plein écran `F11`
+recommandé). Cette page d'accueil permet de choisir le **moteur de suivi du regard** :
+
+- **WebGazer.js** (`index.html`) — solution clé-en-main, mapping écran intégré.
+- **MediaPipe FaceLandmarker** (`index-mediapipe.html`) — détection iris haute
+  précision + pose de tête, régression écran apprise à la calibration, compensation
+  de tête native.
+
+Autoriser la webcam, puis suivre le parcours :
 
 1. Formulaire participant → 2. Positionnement → 3. Calibration (25 points) →
 4. Validation (9 points) → 5. Démo sur graphiques → 6. Export.
+
+Les deux moteurs partagent la même chaîne d'analyse (fixations/saccades), le même
+journal (`GazeLogger`) et le même format d'export.
 
 Le protocole de test détaillé est dans [`TEST_PROTOCOL.md`](TEST_PROTOCOL.md).
 
@@ -67,19 +77,22 @@ fixations/saccades, capture). Aucune webcam requise — les API navigateur sont 
 
 ```
 .
-├── index.html              Application principale (calibration + démo + export)
-├── demo.html               Variante démo autonome
+├── choose.html             Page d'accueil — choix du moteur (WebGazer / MediaPipe)
+├── index.html              Application WebGazer (calibration + démo + export)
+├── index-mediapipe.html    Application MediaPipe (même chaîne d'analyse)
+├── demo.html               Variante démo autonome (WebGazer)
 ├── calibration.html        Page de calibration seule
 ├── participant-form.html   Formulaire participant
-├── package.json            Scripts npm (serve, test)
+├── package.json            Scripts npm (serve, test, generate-data)
 ├── schema/
 │   └── session.schema.json JSON Schema du format d'export (draft-07)
 ├── src/
 │   ├── gaze-capture/       Module de capture WebGazer (GazeCapture)
+│   ├── gaze-engine/        Moteur MediaPipe : features iris + ridge (MediaPipeEngine)
 │   ├── calibration/        Calibration, filtres, I-DT/I-VT (Calibration)
 │   ├── logger/             Journalisation + export JSON/JSON-LD (GazeLogger)
 │   ├── barchart/ linechart/ scatterchart/   Visualisations de démonstration
-├── tests/                  Tests unitaires Node
+├── tests/                  Tests unitaires Node (326 tests)
 ├── docs/
 │   └── LOG_FORMAT.md       Documentation du format de log
 ├── rapport/                Rapport technique (LaTeX)
@@ -91,8 +104,20 @@ fixations/saccades, capture). Aucune webcam requise — les API navigateur sont 
 | Module | Global | Rôle |
 |--------|--------|------|
 | `src/gaze-capture/gaze-capture.js` | `GazeCapture` | Démarre/arrête WebGazer, émet les points de regard |
+| `src/gaze-engine/mediapipe-engine.js` | `MediaPipeEngine` | Moteur alternatif : features iris + pose de tête → régression ridge → point écran |
 | `src/calibration/calibration.js`   | `Calibration` | Calibration, correction spatiale, lissage, fixations/saccades |
 | `src/logger/gaze-logger.js`         | `GazeLogger`  | Journalisation et export structuré |
+
+### Moteur MediaPipe (`MediaPipeEngine`)
+
+Contrairement à WebGazer, MediaPipe ne fournit pas de point de regard à l'écran : il
+fournit 478 landmarks faciaux (iris inclus) + une matrice de pose 3D. Le moteur
+construit un vecteur de **features** (position relative de l'iris dans chaque orbite,
+ouverture des yeux, orientation de la tête) puis apprend une **régression ridge**
+features → coordonnées écran pendant la calibration. La compensation des mouvements de
+tête est ainsi **native** (la pose fait partie des features). La couche mathématique
+(`MediaPipeEngine._math` : `extractFeatures`, `ridgeSolve`, `predictLinear`) est pure
+et couverte par les tests.
 
 Exemple minimal :
 
