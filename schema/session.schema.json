@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://i3s.unice.fr/activity-tracker/schema/session.schema.json",
+  "title": "WebGaze Activity Tracker — Session Log",
+  "description": "Format structuré d'export d'une session de suivi du regard (PIR Activity Tracker). Produit par GazeLogger.export().",
+  "type": "object",
+  "required": ["session", "raw_gaze_data", "events", "aoi_hits", "interactions"],
+  "additionalProperties": false,
+  "properties": {
+    "session": { "$ref": "#/definitions/session" },
+    "raw_gaze_data": {
+      "type": "array",
+      "description": "Points de regard bruts (après correction et lissage), un par frame.",
+      "items": { "$ref": "#/definitions/gazePoint" }
+    },
+    "events": {
+      "type": "array",
+      "description": "Événements de haut niveau extraits par post-traitement (fixations, saccades).",
+      "items": { "$ref": "#/definitions/event" }
+    },
+    "aoi_hits": {
+      "type": "array",
+      "description": "Fixations tombant dans une zone d'intérêt (Area Of Interest).",
+      "items": { "$ref": "#/definitions/aoiHit" }
+    },
+    "interactions": {
+      "type": "array",
+      "description": "Journal d'interactions multimodales (clics, survols regard, navigation, contrôles).",
+      "items": { "$ref": "#/definitions/interaction" }
+    }
+  },
+  "definitions": {
+    "session": {
+      "type": "object",
+      "required": ["id", "participant_id", "start_time"],
+      "properties": {
+        "id":             { "type": "string", "description": "UUID v4 de la session." },
+        "format_version": { "type": "string", "description": "Version du format d'export (semver)." },
+        "participant_id": { "type": "string" },
+        "start_time":     { "type": "string", "format": "date-time" },
+        "end_time":       { "type": ["string", "null"], "format": "date-time" },
+        "clock_origin_ms": {
+          "type": "number",
+          "description": "Origine de l'horloge monotone (performance.now()). Les t_rel_ms y sont relatifs."
+        },
+        "screen_resolution": {
+          "type": "object",
+          "properties": {
+            "width":  { "type": "number" },
+            "height": { "type": "number" }
+          }
+        },
+        "device_pixel_ratio": { "type": "number" },
+        "user_agent": { "type": ["string", "null"] },
+        "browser":    { "type": "string" },
+        "calibration_score": {
+          "type": ["object", "null"],
+          "description": "Qualité de calibration au démarrage de la session.",
+          "properties": {
+            "mean_error_px": { "type": ["number", "null"] },
+            "std_error_px":  { "type": ["number", "null"] }
+          }
+        },
+        "calibration_version": { "type": ["string", "null"] },
+        "config_snapshot": {
+          "type": ["object", "null"],
+          "description": "Instantané des paramètres de filtrage/correction (reproductibilité)."
+        }
+      }
+    },
+    "gazePoint": {
+      "type": "object",
+      "required": ["x", "y", "timestamp"],
+      "properties": {
+        "x":         { "type": "number", "description": "Coordonnée écran X (px)." },
+        "y":         { "type": "number", "description": "Coordonnée écran Y (px)." },
+        "timestamp": { "type": "number", "description": "Epoch ms (Date.now())." },
+        "t_rel_ms":  { "type": "number", "description": "Temps relatif à clock_origin_ms (horloge monotone)." }
+      }
+    },
+    "event": {
+      "type": "object",
+      "required": ["type", "start_time", "end_time", "duration"],
+      "properties": {
+        "type":       { "type": "string", "enum": ["fixation", "saccade", "unknown"] },
+        "start_time": { "type": "number" },
+        "end_time":   { "type": "number" },
+        "duration":   { "type": "number" },
+        "details": {
+          "type": "object",
+          "description": "Charge utile selon le type : {x,y,points_count} pour une fixation, {start_x,start_y,end_x,end_y,amplitude,peak_velocity} pour une saccade.",
+          "additionalProperties": true
+        }
+      }
+    },
+    "aoiHit": {
+      "type": "object",
+      "required": ["aoi_id", "aoi_label", "event_index"],
+      "properties": {
+        "aoi_id":      { "type": "string" },
+        "aoi_label":   { "type": "string" },
+        "event_index": { "type": "number", "description": "Index dans le tableau events[] de la fixation associée." },
+        "timestamp":   { "type": "number" },
+        "t_rel_ms":    { "type": "number" }
+      }
+    },
+    "interaction": {
+      "type": "object",
+      "required": ["type", "timestamp"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Type d'interaction.",
+          "examples": ["session_start", "session_stop", "tab_change", "gaze_enter_aoi", "export", "control"]
+        },
+        "details":   { "type": "object", "additionalProperties": true },
+        "timestamp": { "type": "number" },
+        "t_rel_ms":  { "type": "number" }
+      }
+    }
+  }
+}

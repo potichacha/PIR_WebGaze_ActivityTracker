@@ -1,0 +1,377 @@
+\documentclass[11pt,a4paper]{article}
+
+% ─── Encodage & langue ───────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[french]{babel}
+\usepackage{lmodern}
+
+% ─── Mise en page ────────────────────────────────────────────────────────────
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{enumitem}
+\usepackage{amsmath}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true, linkcolor=black, urlcolor=blue, citecolor=black}
+
+% ─── Style code ──────────────────────────────────────────────────────────────
+\definecolor{codebg}{rgb}{0.96,0.96,0.96}
+\definecolor{codekw}{rgb}{0.10,0.30,0.65}
+\definecolor{codecm}{rgb}{0.30,0.55,0.30}
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  backgroundcolor=\color{codebg},
+  keywordstyle=\color{codekw}\bfseries,
+  commentstyle=\color{codecm}\itshape,
+  stringstyle=\color{purple},
+  breaklines=true, frame=single, framesep=4pt,
+  showstringspaces=false, columns=fullflexible,
+  numbers=left, numberstyle=\tiny\color{gray}, numbersep=6pt,
+}
+
+\newcommand{\code}[1]{\texttt{\small #1}}
+
+% ─── Page de titre ───────────────────────────────────────────────────────────
+\title{\textbf{Conception et développement d'un système de suivi\\
+d'activité utilisateur pour visualisations web}\\[4pt]
+\large Composant de suivi du regard de l'\textit{Activity Tracker}}
+\author{Projet PIR — Laboratoire i3S, Université Côte d'Azur\\
+\small Encadrante : Aline Menin}
+\date{Juin 2026 \\ \small\textit{Version~1 — rapport technique (brouillon)}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\noindent
+Ce rapport décrit le prototype du composant de \textbf{suivi du regard}
+(\textit{eye-tracking}) d'un \textit{Activity Tracker} destiné à l'étude des
+processus de raisonnement analytique sur des visualisations de données web. Le
+prototype repose sur \textbf{WebGazer.js} pour estimer la direction du regard à
+partir d'une webcam standard, sans matériel spécialisé. Il fournit~: un module de
+capture, une calibration avancée (correction spatiale continue, compensation des
+mouvements de tête, validation par leave-one-out), un post-traitement extrayant
+\textbf{fixations} et \textbf{saccades} (algorithmes I-DT et I-VT), et un
+\textbf{format de journalisation structuré} exporté en JSON et JSON-LD pour
+intégration ultérieure dans un graphe de connaissances. La validation logicielle
+s'appuie sur 237 tests unitaires automatisés. Ce document constitue une première
+version~: la section d'évaluation utilisateur (3--5 participants) présente le
+protocole et un cadre d'analyse à compléter par les données réelles.
+\end{abstract}
+
+\tableofcontents
+\bigskip\hrule
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{Introduction et contexte}
+
+Comprendre comment les utilisateurs explorent visuellement les visualisations de
+données est essentiel pour étudier le raisonnement analytique. En recherche en
+visualisation d'information, les journaux d'interaction et le suivi du regard sont
+couramment combinés pour analyser le comportement et l'attention visuelle.
+
+Les progrès du suivi du regard \emph{dans le navigateur}, en particulier
+WebGazer.js~\cite{papoutsaki2016}, permettent d'estimer le regard depuis une
+webcam standard, ce qui facilite les études en ligne à grande échelle. Ce projet
+s'inscrit dans un effort plus large visant à construire un \textit{Activity
+Tracker} collectant des données multimodales (interactions, regard,
+verbalisations) pour étudier les processus analytiques et soutenir la conception
+de visualisations adaptatives, les données étant à terme intégrées dans un
+\textbf{graphe de connaissances}.
+
+\paragraph{Objectif.} Prototyper le composant de suivi du regard dans un
+environnement de visualisation web. Les tâches sont~: (T1) étudier les solutions
+open-source~; (T2) implémenter la capture~; (T3) extraire fixations et saccades~;
+(T4) définir un format de journalisation~; (T5) tester avec 3--5 participants.
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{T1 — Étude des solutions open-source}
+
+Plusieurs bibliothèques de suivi du regard par webcam existent. Le tableau~\ref{tab:compare}
+résume les principales options évaluées.
+
+\begin{table}[h]
+\centering
+\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{>{\raggedright\arraybackslash}p{3.0cm} p{3.4cm} p{3.4cm} p{3.4cm}}
+\toprule
+\textbf{Critère} & \textbf{WebGazer.js} & \textbf{GazeCloudAPI} & \textbf{TF.js + FaceMesh (maison)} \\
+\midrule
+Exécution & 100\,\% navigateur & Service cloud & 100\,\% navigateur \\
+Matériel & Webcam standard & Webcam standard & Webcam standard \\
+Licence & Open-source (GPLv3) & Propriétaire / quota & Open-source \\
+Vie privée & Local, aucune donnée envoyée & Vidéo envoyée au cloud & Local \\
+Calibration & Intégrée (clics) & Intégrée & À implémenter \\
+Maturité & Élevée, citée en recherche & Moyenne & Faible (tout à coder) \\
+\bottomrule
+\end{tabular}
+\caption{Comparaison des solutions de suivi du regard par webcam.}
+\label{tab:compare}
+\end{table}
+
+\paragraph{Choix : WebGazer.js.} Il combine exécution 100\,\% locale (respect de la
+vie privée, condition importante pour des études), licence open-source, large
+adoption en recherche et calibration intégrée. GazeCloudAPI est écarté car il
+transmet le flux vidéo à un service tiers~; une solution maison sur TensorFlow.js
+offrirait plus de contrôle mais représente un coût de développement disproportionné
+pour un prototype de deux semaines.
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{T2 — Module de capture du regard}
+
+\subsection{Architecture}
+
+Le prototype est une application web statique (HTML + JavaScript, sans étape de
+\textit{build}), organisée en modules indépendants exposés comme objets globaux
+(tableau~\ref{tab:modules}).
+
+\begin{table}[h]
+\centering
+\begin{tabular}{l l p{7.5cm}}
+\toprule
+\textbf{Fichier} & \textbf{Global} & \textbf{Rôle} \\
+\midrule
+\code{gaze-capture.js} & \code{GazeCapture} & Démarrage/arrêt de WebGazer, émission des points. \\
+\code{calibration.js}  & \code{Calibration} & Calibration, correction spatiale, lissage, détection fixations/saccades. \\
+\code{gaze-logger.js}  & \code{GazeLogger}  & Journalisation et export structuré (JSON / JSON-LD). \\
+\bottomrule
+\end{tabular}
+\caption{Modules principaux et API publiques.}
+\label{tab:modules}
+\end{table}
+
+\subsection{Capture}
+
+Le module \code{GazeCapture} vérifie la disponibilité de la webcam via
+\code{getUserMedia}, initialise WebGazer (régression \emph{ridge}, traqueur
+TFFacemesh), puis émet à chaque trame un point $\{x, y, \text{timestamp}\}$ aux
+abonnés. Deux précautions améliorent la qualité du modèle~: la suppression des
+écouteurs souris (\code{removeMouseEventListeners}), car le mouvement de souris
+pollue l'entraînement, et la contrainte explicite de résolution caméra.
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{Calibration et précision}
+
+Au-delà du sujet, un effort particulier a porté sur la \textbf{qualité de
+calibration}, principal facteur limitant du suivi du regard par webcam.
+
+\subsection{Procédure}
+
+Une grille de \textbf{25 points} ($5\times5$, bords densifiés) est présentée~; à
+chaque point, plusieurs clics enregistrent des couples (regard, position écran).
+Une grille de \textbf{9 points indépendants} sert à la validation. Un écran de
+positionnement préalable vérifie luminosité, équilibre d'éclairage et distance
+($\approx$60\,cm) via l'analyse de la luminance webcam.
+
+\subsection{Correction spatiale}
+
+L'erreur résiduelle après régression n'est pas uniforme sur l'écran. Un
+\textbf{champ de correction continu} est estimé à partir des points de validation.
+Une régression locale pondérée \textbf{LOWESS} (noyau tricubique) corrige chaque
+prédiction, avec repli sur une pondération par distance inverse (IDW) hors de la
+bande passante~:
+\[
+\hat{e}(p) = \frac{\sum_i w_i\, e_i}{\sum_i w_i}, \qquad
+w_i = \left(1 - \left(\tfrac{d_i}{h}\right)^3\right)^3 \ \text{pour}\ d_i < h .
+\]
+Un point d'attention important a été corrigé~: une version antérieure
+\emph{chaînait} IDW puis LOWESS, tous deux estimant le \emph{même} champ d'erreur,
+ce qui produisait une \textbf{sur-correction}. Un seul estimateur est désormais
+appliqué.
+
+\subsection{Score honnête par validation croisée}
+
+Évaluer la précision sur les points qui ont servi à construire la correction est
+optimiste (évaluation sur le jeu d'entraînement). Le prototype calcule donc une
+erreur de \textbf{généralisation par leave-one-out}~: pour chaque point de
+validation, le champ de correction est reconstruit \emph{sans} ce point, puis
+l'erreur résiduelle est mesurée sur le point exclu. C'est cette valeur qui est
+rapportée comme indicateur réaliste.
+
+\subsection{Lissage temporel et compensation de tête}
+
+En temps réel, un filtre \textbf{One Euro}~\cite{casiez2012} lisse le tremblement
+au repos sans introduire de latence sur les saccades. WebGazer supposant la tête
+immobile, une \textbf{compensation des mouvements de tête} a été ajoutée~: le
+centroïde des points caractéristiques du visage est mémorisé en référence, et tout
+déplacement ultérieur génère un décalage écran proportionnel et borné, réduisant la
+dérive sur les sessions longues.
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{T3 — Extraction des fixations et saccades}
+
+Deux algorithmes classiques de l'analyse du regard~\cite{salvucci2000} sont
+implémentés.
+
+\paragraph{Fixations — I-DT (Dispersion-Threshold).} Une fenêtre temporelle
+glissante regroupe les points dont la dispersion spatiale
+$(\max_x - \min_x) + (\max_y - \min_y)$ reste sous un seuil pendant une durée
+minimale. L'implémentation utilise des \textit{deques} monotones pour calculer la
+dispersion en $O(n)$ amorti~; le traitement de 10\,000 points s'exécute en moins
+de 50\,ms.
+
+\paragraph{Saccades — I-VT (Velocity-Threshold).} Les transitions dont la vélocité
+instantanée dépasse un seuil sont marquées comme saccades, caractérisées par leur
+amplitude et leur vélocité maximale. Une fonction \code{linkEvents} produit une
+chronologie alternant fixations et saccades.
+
+Chaque fixation peut être associée à une \textbf{zone d'intérêt} (AOI) de la
+visualisation regardée, base de l'analyse attentionnelle.
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{T4 — Format de journalisation structuré}
+
+\subsection{Structure}
+
+Une session exportée comporte cinq sections (listing~\ref{lst:format})~: métadonnées
+\code{session}, points bruts \code{raw\_gaze\_data}, événements \code{events}
+(fixations/saccades), \code{aoi\_hits}, et \code{interactions} multimodales. Le
+format est décrit par un \textbf{JSON Schema} (draft-07) qui le rend validable et
+auto-documenté.
+
+\begin{lstlisting}[language=, caption={Structure d'une session exportée (extrait).}, label=lst:format]
+{
+  "session": {
+    "id": "uuid", "format_version": "1.1.0",
+    "participant_id": "P01", "clock_origin_ms": 12345.6,
+    "calibration_score": { "mean_error_px": 92.4 },
+    "config_snapshot": { "lowess_bandwidth": 0.45, ... }
+  },
+  "raw_gaze_data": [ { "x": 812, "y": 437, "t_rel_ms": 4502.1 }, ... ],
+  "events":        [ { "type": "fixation", "duration": 280,
+                       "details": { "x": 810, "y": 440 } }, ... ],
+  "aoi_hits":      [ { "aoi_id": "bar-q3", "event_index": 12 }, ... ],
+  "interactions":  [ { "type": "tab_change", "t_rel_ms": 8100.0 }, ... ]
+}
+\end{lstlisting}
+
+\subsection{Choix de conception}
+
+\begin{itemize}[leftmargin=1.4em]
+  \item \textbf{Double horloge.} Chaque enregistrement porte un \code{timestamp}
+  epoch (lisible) \emph{et} un \code{t\_rel\_ms} issu de \code{performance.now()},
+  horloge \textbf{monotone} indispensable au calcul fiable des durées et vélocités.
+  \item \textbf{Reproductibilité.} \code{config\_snapshot} fige les paramètres de
+  filtrage/correction effectifs, permettant de rejouer ou comparer deux sessions.
+  \item \textbf{Multimodalité.} La section \code{interactions} journalise clics,
+  changements d'onglet et entrées du regard dans une AOI, conformément à l'objectif
+  d'\textit{Activity Tracker}.
+\end{itemize}
+
+\subsection{Export orienté graphe de connaissances (JSON-LD)}
+
+Un second export en \textbf{JSON-LD} représente la session comme un graphe de
+nœuds typés sous un vocabulaire \code{wga:} (\code{wga:Session}, \code{wga:Fixation},
+\code{wga:Saccade}, \code{wga:AOIHit}, \code{wga:Interaction}). Ce format se charge
+directement dans un triple store RDF, anticipant l'intégration au graphe de
+connaissances de l'\textit{Activity Tracker}.
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{T5 — Évaluation avec participants}
+
+\subsection{Protocole}
+
+Le protocole (détaillé dans \code{TEST\_PROTOCOL.md}) prévoit 3 à 5 participants.
+Chaque session enchaîne~: fiche participant, positionnement, calibration (25
+points) et validation (9 points), puis des tâches d'analyse sur trois
+visualisations (\textit{bar chart}, \textit{line chart}, \textit{scatter plot}),
+et enfin l'export des données et un court questionnaire de ressenti.
+
+\paragraph{Mesures collectées.} Erreur moyenne et leave-one-out de calibration
+(px), erreur par quadrant, pourcentage d'échantillons dans la zone acceptable,
+fréquence d'échantillonnage (Hz), dérive estimée, nombre de fixations/saccades,
+et ressenti subjectif (échelles 1--5).
+
+\subsection{Jeux de données et cadre d'analyse}
+
+En l'absence de sessions réelles dans cette première version, trois sessions
+\textbf{simulées} (bruit de 18, 35 et 60\,px) ont été générées avec la chaîne de
+post-traitement réelle, pour illustrer le format et le pipeline
+(tableau~\ref{tab:sim}). On observe l'effet attendu~: dégrader la qualité de
+calibration effondre le nombre de fixations détectables, illustration concrète
+d'une limite pratique de l'approche webcam.
+
+\begin{table}[h]
+\centering
+\begin{tabular}{l r r r r}
+\toprule
+\textbf{Session (bruit)} & \textbf{Points} & \textbf{Fixations} & \textbf{Saccades} & \textbf{AOI} \\
+\midrule
+SIM-P01 (18\,px) & 255 & 23 & 44 & 23 \\
+SIM-P02 (35\,px) & 196 & 18 & 36 & 18 \\
+SIM-P03 (60\,px) & 165 & 2  & 13 & 2  \\
+\bottomrule
+\end{tabular}
+\caption{Sessions simulées — effet de la qualité de calibration sur la détection.
+\emph{Données synthétiques, à remplacer par les sessions réelles.}}
+\label{tab:sim}
+\end{table}
+
+\paragraph{À compléter.} Cette section sera enrichie des résultats des 3--5
+participants réels~: tableau récapitulatif par participant, distribution des
+erreurs de calibration, et synthèse qualitative des questionnaires.
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{Validation logicielle}
+
+La logique métier (algorithmes I-DT/I-VT, filtres, correction spatiale, format de
+log) est couverte par \textbf{237 tests unitaires} automatisés (Node, sans webcam),
+exécutables par \code{npm test}. Ils vérifient notamment~: la correction unique
+(non sur-corrigée), la validation leave-one-out, le lissage One Euro, la robustesse
+des détecteurs sur cas limites, et la performance ($<$50\,ms sur 10\,000 points).
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{Limitations et perspectives}
+
+\paragraph{Limitations.} La précision reste dépendante de l'éclairage, de la qualité
+de la webcam et de l'immobilité de la tête — limites intrinsèques au suivi du
+regard par webcam. La fréquence d'échantillonnage varie selon la machine
+(typiquement 10--30\,Hz). Une dérive temporelle subsiste sur les longues sessions,
+seulement atténuée par la compensation de tête.
+
+\paragraph{Perspectives.}
+\begin{itemize}[leftmargin=1.4em]
+  \item Réaliser les sessions réelles (T5) et consolider l'analyse quantitative.
+  \item Étendre la multimodalité aux \textbf{verbalisations} (think-aloud) prévues
+  par l'\textit{Activity Tracker}.
+  \item Définir et publier le vocabulaire \code{wga:} et charger les exports JSON-LD
+  dans le graphe de connaissances cible.
+  \item Étalonner empiriquement le gain de compensation de tête sur plusieurs
+  configurations matérielles.
+\end{itemize}
+
+% ═════════════════════════════════════════════════════════════════════════════
+\section{Conclusion}
+
+Le prototype répond aux tâches T1--T4~: une solution open-source a été choisie et
+justifiée, la capture, le post-traitement (fixations/saccades) et un format de
+journalisation structuré (JSON et JSON-LD) sont opérationnels et testés. La
+calibration a fait l'objet d'améliorations dépassant le cadre initial (correction
+spatiale continue, score honnête par leave-one-out, compensation de tête). Il reste
+à mener l'évaluation utilisateur (T5) pour quantifier en conditions réelles la
+stabilité de la capture et les limites pratiques de l'approche.
+
+% ═════════════════════════════════════════════════════════════════════════════
+\begin{thebibliography}{9}
+\bibitem{papoutsaki2016}
+A.~Papoutsaki \emph{et al.},
+\textit{WebGazer: Scalable Webcam Eye Tracking Using User Interactions},
+IJCAI, 2016.
+
+\bibitem{casiez2012}
+G.~Casiez, N.~Roussel, D.~Vogel,
+\textit{1\,€ Filter: A Simple Speed-based Low-pass Filter for Noisy Input in
+Interactive Systems}, ACM CHI, 2012.
+
+\bibitem{salvucci2000}
+D.~D.~Salvucci, J.~H.~Goldberg,
+\textit{Identifying Fixations and Saccades in Eye-Tracking Protocols},
+ETRA, 2000.
+\end{thebibliography}
+
+\end{document}

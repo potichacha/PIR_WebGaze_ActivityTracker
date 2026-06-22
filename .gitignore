@@ -1,0 +1,15 @@
+# Dépendances
+node_modules/
+
+# Artefacts LaTeX
+rapport/*.aux
+rapport/*.log
+rapport/*.out
+rapport/*.toc
+rapport/*.synctex.gz
+rapport/*.fls
+rapport/*.fdb_latexmk
+
+# Divers
+.DS_Store
+Thumbs.db

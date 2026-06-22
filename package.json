@@ -4,7 +4,8 @@
   "description": "WebGaze Activity Tracker - PIR Project",
   "scripts": {
     "serve": "python -m http.server 8080",
-    "test": "node tests/test-calibration.js && node tests/test-gaze-capture.js"
+    "test": "node tests/test-calibration.js && node tests/test-gaze-capture.js && node tests/test-gaze-logger.js",
+    "generate-data": "node tools/generate-sample-data.js"
   },
   "devDependencies": {}
 }

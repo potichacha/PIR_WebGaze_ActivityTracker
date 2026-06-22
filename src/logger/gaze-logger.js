@@ -63,11 +63,23 @@
     } catch (_) { return null; }
   }
 
+  // Horloge monotone : performance.now() ne recule jamais (contrairement à
+  // Date.now() sujet aux ajustements NTP/changements d'heure), ce qui est
+  // indispensable pour des durées de fixation et des vélocités fiables.
+  function _now() {
+    if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
+      return performance.now();
+    }
+    return Date.now();
+  }
+
   // ─── État interne ────────────────────────────────────────────────────────────
-  var _session     = null;
-  var _rawGaze     = [];
-  var _events      = [];
-  var _aoiHits     = [];
+  var _session       = null;
+  var _rawGaze       = [];
+  var _events        = [];
+  var _aoiHits       = [];
+  var _interactions  = []; // journal d'interactions (clics, survols, navigation…)
+  var _clockOrigin   = 0;  // performance.now() au démarrage de la session
 
   // ─── API publique ────────────────────────────────────────────────────────────
   var GazeLogger = {
@@ -78,14 +90,20 @@
      * @param {object} [calibrationScore] — { mean_error_px, std_error_px }
      */
     init: function (participantId, calibrationScore) {
-      _rawGaze  = [];
-      _events   = [];
-      _aoiHits  = [];
+      _rawGaze       = [];
+      _events        = [];
+      _aoiHits       = [];
+      _interactions  = [];
+      _clockOrigin   = _now();
       _session  = {
         id:             _uuid(),
+        format_version: GazeLogger.FORMAT_VERSION,
         participant_id: participantId || 'anonymous',
         start_time:     new Date().toISOString(),
         end_time:       null,
+        // Origine de l'horloge monotone : tous les timestamps relatifs (t_rel_ms)
+        // sont exprimés par rapport à cet instant.
+        clock_origin_ms: _clockOrigin,
         screen_resolution: {
           width:  window.innerWidth,
           height: window.innerHeight,
@@ -110,7 +128,29 @@
      */
     logRawPoint: function (x, y, timestamp) {
       if (!_session) return;
-      _rawGaze.push({ x: Math.round(x), y: Math.round(y), timestamp: timestamp || Date.now() });
+      _rawGaze.push({
+        x: Math.round(x),
+        y: Math.round(y),
+        timestamp: timestamp || Date.now(),     // epoch ms (rétro-compatible)
+        t_rel_ms:  +(_now() - _clockOrigin).toFixed(1), // horloge monotone relative
+      });
+    },
+
+    /**
+     * Enregistre une interaction utilisateur (donnée multimodale : clic, survol,
+     * changement d'onglet, scroll, démarrage/arrêt…). Complète le regard pour
+     * reconstituer l'activité analytique complète.
+     * @param {string} type   — 'click' | 'hover' | 'tab_change' | 'scroll' | 'control' | …
+     * @param {object} [details] — charge utile libre (target, value, x, y…)
+     */
+    logInteraction: function (type, details) {
+      if (!_session) return;
+      _interactions.push({
+        type:      type || 'unknown',
+        details:   details || {},
+        timestamp: Date.now(),
+        t_rel_ms:  +(_now() - _clockOrigin).toFixed(1),
+      });
     },
 
     /**
@@ -142,6 +182,7 @@
         aoi_label:   aoiLabel || '',
         event_index: typeof eventIndex === 'number' ? eventIndex : -1,
         timestamp:   timestamp || Date.now(),
+        t_rel_ms:    +(_now() - _clockOrigin).toFixed(1),
       });
     },
 
@@ -160,10 +201,95 @@
           user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
           browser: _browserName(), calibration_score: null,
           calibration_version: _calibrationVersion(), config_snapshot: _configSnapshot(),
+          format_version: GazeLogger.FORMAT_VERSION,
         },
         raw_gaze_data: _rawGaze.slice(),
         events:        _events.slice(),
         aoi_hits:      _aoiHits.slice(),
+        interactions:  _interactions.slice(),
+      };
+    },
+
+    /**
+     * Exporte la session au format JSON-LD orienté graphe de connaissances.
+     * Chaque entité (session, participant, fixation, saccade, interaction, AOI)
+     * devient un nœud typé, prêt à être intégré dans un knowledge graph (objectif
+     * Activity Tracker du PIR). Vocabulaire minimal sous le préfixe `wga:`.
+     * @returns {object} document JSON-LD (@context + @graph)
+     */
+    exportJsonLd: function () {
+      var data = this.export();
+      var s = data.session;
+      var base = 'urn:wga:session:' + s.id + ':';
+      var graph = [];
+
+      graph.push({
+        '@id': 'urn:wga:session:' + s.id,
+        '@type': 'wga:Session',
+        'wga:participant': { '@id': 'urn:wga:participant:' + s.participant_id },
+        'wga:startTime': s.start_time,
+        'wga:endTime': s.end_time,
+        'wga:browser': s.browser,
+        'wga:screenWidth': s.screen_resolution ? s.screen_resolution.width : null,
+        'wga:screenHeight': s.screen_resolution ? s.screen_resolution.height : null,
+        'wga:calibrationVersion': s.calibration_version || null,
+      });
+
+      graph.push({
+        '@id': 'urn:wga:participant:' + s.participant_id,
+        '@type': 'wga:Participant',
+        'wga:identifier': s.participant_id,
+      });
+
+      data.events.forEach(function (e, i) {
+        var node = {
+          '@id': base + e.type + ':' + i,
+          '@type': e.type === 'fixation' ? 'wga:Fixation'
+                 : e.type === 'saccade'  ? 'wga:Saccade' : 'wga:GazeEvent',
+          'wga:inSession': { '@id': 'urn:wga:session:' + s.id },
+          'wga:startTime': e.start_time,
+          'wga:endTime': e.end_time,
+          'wga:duration': e.duration,
+        };
+        if (e.details) {
+          if (typeof e.details.x === 'number') node['wga:x'] = e.details.x;
+          if (typeof e.details.y === 'number') node['wga:y'] = e.details.y;
+          if (typeof e.details.amplitude === 'number') node['wga:amplitude'] = e.details.amplitude;
+        }
+        graph.push(node);
+      });
+
+      data.aoi_hits.forEach(function (h, i) {
+        graph.push({
+          '@id': base + 'aoihit:' + i,
+          '@type': 'wga:AOIHit',
+          'wga:inSession': { '@id': 'urn:wga:session:' + s.id },
+          'wga:aoi': { '@id': 'urn:wga:aoi:' + (h.aoi_id || 'unknown') },
+          'wga:aoiLabel': h.aoi_label,
+          'wga:atEvent': h.event_index,
+          'wga:timeRel': h.t_rel_ms,
+        });
+      });
+
+      data.interactions.forEach(function (it, i) {
+        graph.push({
+          '@id': base + 'interaction:' + i,
+          '@type': 'wga:Interaction',
+          'wga:inSession': { '@id': 'urn:wga:session:' + s.id },
+          'wga:interactionType': it.type,
+          'wga:timeRel': it.t_rel_ms,
+          'wga:details': it.details,
+        });
+      });
+
+      return {
+        '@context': {
+          'wga': 'https://i3s.unice.fr/activity-tracker/vocab#',
+          'wga:participant': { '@type': '@id' },
+          'wga:inSession':   { '@type': '@id' },
+          'wga:aoi':         { '@type': '@id' },
+        },
+        '@graph': graph,
       };
     },
 
@@ -185,13 +311,32 @@
     },
 
     /**
+     * Déclenche le téléchargement de l'export JSON-LD (graphe de connaissances).
+     */
+    downloadJsonLd: function () {
+      var data = this.exportJsonLd();
+      var sess = this.export().session;
+      var pid  = (sess.participant_id || 'session').replace(/[^a-zA-Z0-9_-]/g, '_');
+      var date = new Date().toISOString().slice(0, 10);
+      var name = 'session_' + pid + '_' + date + '.jsonld';
+      var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/ld+json' });
+      var url  = URL.createObjectURL(blob);
+      var a    = document.createElement('a');
+      a.href     = url;
+      a.download = name;
+      a.click();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    },
+
+    /**
      * Remet le logger à zéro (sans re-init de session).
      */
     clear: function () {
-      _session  = null;
-      _rawGaze  = [];
-      _events   = [];
-      _aoiHits  = [];
+      _session       = null;
+      _rawGaze       = [];
+      _events        = [];
+      _aoiHits       = [];
+      _interactions  = [];
     },
 
     /**
@@ -200,15 +345,19 @@
      */
     getStats: function () {
       return {
-        rawPoints: _rawGaze.length,
-        fixations: _events.filter(function (e) { return e.type === 'fixation'; }).length,
-        saccades:  _events.filter(function (e) { return e.type === 'saccade';  }).length,
-        aoiHits:   _aoiHits.length,
+        rawPoints:    _rawGaze.length,
+        fixations:    _events.filter(function (e) { return e.type === 'fixation'; }).length,
+        saccades:     _events.filter(function (e) { return e.type === 'saccade';  }).length,
+        aoiHits:      _aoiHits.length,
+        interactions: _interactions.length,
       };
     },
 
     isInitialized: function () { return !!_session; },
   };
+
+  // Version du format d'export — à incrémenter à tout changement de schéma.
+  GazeLogger.FORMAT_VERSION = '1.1.0';
 
   global.GazeLogger = GazeLogger;
 
