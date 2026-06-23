@@ -542,7 +542,30 @@
     }
 
     const pred = _lastFeatures ? _predictScreen(_lastFeatures) : null;
-    if (pred) _emit({ x: pred.x, y: pred.y, timestamp: Date.now() });
+    if (pred) {
+      _emit({
+        x: pred.x, y: pred.y, timestamp: Date.now(),
+        confidence: _predictionConfidence(_lastFeatures, pred),
+      });
+    }
+  }
+
+  // Confiance de la prédiction MediaPipe ∈ [0,1] : combine l'ouverture des yeux
+  // (yeux fermés → peu fiable) et la plausibilité à l'écran (un point hors viewport
+  // signale une extrapolation hasardeuse).
+  function _predictionConfidence(features, pred) {
+    let conf = 1;
+    const open = features && features._eyeOpen;
+    if (typeof open === 'number') {
+      conf *= Math.max(0, Math.min(1, open / (CONFIG.EYE_OPEN_MIN * 3)));
+    }
+    if (_video || (typeof window !== 'undefined')) {
+      const W = (typeof window !== 'undefined' ? window.innerWidth : 1920);
+      const H = (typeof window !== 'undefined' ? window.innerHeight : 1080);
+      const inside = pred.x >= 0 && pred.x <= W && pred.y >= 0 && pred.y <= H;
+      if (!inside) conf *= 0.5;
+    }
+    return +Math.max(0, Math.min(1, conf)).toFixed(4);
   }
 
   // [#7] Boucle de cadencement. requestVideoFrameCallback se déclenche exactement
@@ -739,6 +762,15 @@
     getStatus() { return _status; },
     getErrorMessage() { return _errorMsg; },
     getCurrentFeatures() { return _lastFeatures ? _lastFeatures.slice() : null; },
+    // Un visage est-il actuellement détecté ? (features produites récemment)
+    isFaceDetected() { return !!_lastFeatures; },
+    // Échelle inter-oculaire courante (proxy de distance). null si pas de visage.
+    getFaceScale() {
+      if (!_smoothedLandmarks && !_lastFeatures) return null;
+      try {
+        return _smoothedLandmarks ? interOcularScale(_smoothedLandmarks) : null;
+      } catch (_) { return null; }
+    },
     getSampleCount() { return _samples.length; },
     isTrained() { return !!(_weightsX && _weightsY); },
 

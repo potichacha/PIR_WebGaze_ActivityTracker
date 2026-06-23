@@ -27,6 +27,11 @@
       "type": "array",
       "description": "Journal d'interactions multimodales (clics, survols regard, navigation, contrôles).",
       "items": { "$ref": "#/definitions/interaction" }
+    },
+    "viz_states": {
+      "type": "array",
+      "description": "Historique des états de la visualisation (vue active, dataset, zoom, sélection, filtres).",
+      "items": { "$ref": "#/definitions/vizStateEntry" }
     }
   },
   "definitions": {
@@ -72,10 +77,61 @@
       "type": "object",
       "required": ["x", "y", "timestamp"],
       "properties": {
-        "x":         { "type": "number", "description": "Coordonnée écran X (px)." },
-        "y":         { "type": "number", "description": "Coordonnée écran Y (px)." },
+        "x":         { "type": "number", "description": "Coordonnée écran X corrigée (px)." },
+        "y":         { "type": "number", "description": "Coordonnée écran Y corrigée (px)." },
+        "raw_x":     { "type": "number", "description": "Coordonnée X brute (avant correction)." },
+        "raw_y":     { "type": "number", "description": "Coordonnée Y brute (avant correction)." },
         "timestamp": { "type": "number", "description": "Epoch ms (Date.now())." },
-        "t_rel_ms":  { "type": "number", "description": "Temps relatif à clock_origin_ms (horloge monotone)." }
+        "t_rel_ms":  { "type": "number", "description": "Temps relatif à clock_origin_ms (horloge monotone)." },
+        "confidence":{ "type": "number", "description": "Confiance de la prédiction ∈ [0,1]." },
+        "source_module": { "type": "string", "description": "Moteur émetteur : 'webgazer' | 'mediapipe'." },
+        "dom":       { "$ref": "#/definitions/domDescriptor" },
+        "viz_state": { "$ref": "#/definitions/vizState" }
+      }
+    },
+    "domDescriptor": {
+      "type": "object",
+      "description": "Descripteur détaillé de l'objet DOM observé (barre, axe, point, légende…).",
+      "properties": {
+        "tag":           { "type": "string" },
+        "id":            { "type": ["string", "null"] },
+        "classes":       { "type": "array", "items": { "type": "string" } },
+        "semantic_type": { "type": "string", "description": "bar | axis | legend | point | line | label | …" },
+        "bbox":          {
+          "type": "object",
+          "properties": {
+            "x": { "type": "number" }, "y": { "type": "number" },
+            "width": { "type": "number" }, "height": { "type": "number" }
+          }
+        },
+        "text":         { "type": ["string", "null"] },
+        "aria_label":   { "type": ["string", "null"] },
+        "data":         { "type": ["object", "null"], "description": "Attributs data-* de l'élément." },
+        "css_selector": { "type": ["string", "null"] }
+      }
+    },
+    "vizState": {
+      "type": "object",
+      "description": "État de la visualisation au moment du regard.",
+      "properties": {
+        "active_view": { "type": "string", "description": "bar | line | scatter." },
+        "dataset":     { "type": "string" },
+        "gaze_mode":   { "type": "boolean" },
+        "current_aoi": { "type": ["string", "null"] },
+        "selection":   { "type": ["string", "null"] },
+        "zoom":        { "type": "number" },
+        "filters":     { "type": "array" },
+        "n_aois":      { "type": "number" },
+        "viewport":    { "type": "object" }
+      }
+    },
+    "vizStateEntry": {
+      "type": "object",
+      "required": ["state", "timestamp"],
+      "properties": {
+        "state":     { "$ref": "#/definitions/vizState" },
+        "timestamp": { "type": "number" },
+        "t_rel_ms":  { "type": "number" }
       }
     },
     "event": {
@@ -90,7 +146,8 @@
           "type": "object",
           "description": "Charge utile selon le type : {x,y,points_count} pour une fixation, {start_x,start_y,end_x,end_y,amplitude,peak_velocity} pour une saccade.",
           "additionalProperties": true
-        }
+        },
+        "source_module": { "type": "string" }
       }
     },
     "aoiHit": {
@@ -101,7 +158,10 @@
         "aoi_label":   { "type": "string" },
         "event_index": { "type": "number", "description": "Index dans le tableau events[] de la fixation associée." },
         "timestamp":   { "type": "number" },
-        "t_rel_ms":    { "type": "number" }
+        "t_rel_ms":    { "type": "number" },
+        "source_module": { "type": "string" },
+        "dom":         { "$ref": "#/definitions/domDescriptor" },
+        "viz_state":   { "$ref": "#/definitions/vizState" }
       }
     },
     "interaction": {
@@ -111,11 +171,12 @@
         "type": {
           "type": "string",
           "description": "Type d'interaction.",
-          "examples": ["session_start", "session_stop", "tab_change", "gaze_enter_aoi", "export", "control"]
+          "examples": ["session_start", "session_stop", "tab_change", "gaze_enter_aoi", "export", "control", "online_recalibration"]
         },
-        "details":   { "type": "object", "additionalProperties": true },
-        "timestamp": { "type": "number" },
-        "t_rel_ms":  { "type": "number" }
+        "details":       { "type": "object", "additionalProperties": true },
+        "source_module": { "type": "string" },
+        "timestamp":     { "type": "number" },
+        "t_rel_ms":      { "type": "number" }
       }
     }
   }

@@ -13,13 +13,13 @@
   },
   "@graph": [
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57",
       "@type": "wga:Session",
       "wga:participant": {
         "@id": "urn:wga:participant:SIM-P03"
       },
-      "wga:startTime": "2026-06-22T11:53:03.682Z",
-      "wga:endTime": "2026-06-22T11:53:03.682Z",
+      "wga:startTime": "2026-06-23T12:11:11.022Z",
+      "wga:endTime": "2026-06-23T12:11:11.024Z",
       "wga:browser": "Unknown",
       "wga:screenWidth": 1920,
       "wga:screenHeight": 1080,
@@ -31,10 +31,10 @@
       "wga:identifier": "SIM-P03"
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:fixation:0",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:fixation:0",
       "@type": "wga:Fixation",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 1680,
       "wga:endTime": 1800,
@@ -43,10 +43,10 @@
       "wga:y": 500.2820034832953
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:fixation:1",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:fixation:1",
       "@type": "wga:Fixation",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 4920,
       "wga:endTime": 5040,
@@ -55,10 +55,10 @@
       "wga:y": 601.5001963029329
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:saccade:2",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:saccade:2",
       "@type": "wga:Saccade",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 0,
       "wga:endTime": 320,
@@ -66,10 +66,10 @@
       "wga:amplitude": 162.319043687782
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:saccade:3",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:saccade:3",
       "@type": "wga:Saccade",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 360,
       "wga:endTime": 960,
@@ -77,10 +77,10 @@
       "wga:amplitude": 50.34187372719077
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:saccade:4",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:saccade:4",
       "@type": "wga:Saccade",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 1000,
       "wga:endTime": 1200,
@@ -88,10 +88,10 @@
       "wga:amplitude": 4.067619231608765
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:saccade:5",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:saccade:5",
       "@type": "wga:Saccade",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 1280,
       "wga:endTime": 1320,
@@ -99,10 +99,10 @@
       "wga:amplitude": 66.64477178388547
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:saccade:6",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:saccade:6",
       "@type": "wga:Saccade",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 1360,
       "wga:endTime": 1640,
@@ -110,10 +110,10 @@
       "wga:amplitude": 765.533825390251
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:saccade:7",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:saccade:7",
       "@type": "wga:Saccade",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 1680,
       "wga:endTime": 1720,
@@ -121,10 +121,10 @@
       "wga:amplitude": 50.619766055221696
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:saccade:8",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:saccade:8",
       "@type": "wga:Saccade",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 1760,
       "wga:endTime": 2440,
@@ -132,10 +132,10 @@
       "wga:amplitude": 417.6938871737559
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:saccade:9",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:saccade:9",
       "@type": "wga:Saccade",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 2480,
       "wga:endTime": 4120,
@@ -143,10 +143,10 @@
       "wga:amplitude": 409.5199803180383
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:saccade:10",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:saccade:10",
       "@type": "wga:Saccade",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 4160,
       "wga:endTime": 4200,
@@ -154,10 +154,10 @@
       "wga:amplitude": 57.52217049666059
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:saccade:11",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:saccade:11",
       "@type": "wga:Saccade",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 4240,
       "wga:endTime": 4320,
@@ -165,10 +165,10 @@
       "wga:amplitude": 40.59682066110081
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:saccade:12",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:saccade:12",
       "@type": "wga:Saccade",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 4400,
       "wga:endTime": 6200,
@@ -176,10 +176,10 @@
       "wga:amplitude": 507.70856649491674
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:saccade:13",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:saccade:13",
       "@type": "wga:Saccade",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 6240,
       "wga:endTime": 6320,
@@ -187,10 +187,10 @@
       "wga:amplitude": 36.61595353320258
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:saccade:14",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:saccade:14",
       "@type": "wga:Saccade",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:startTime": 6400,
       "wga:endTime": 6560,
@@ -198,36 +198,38 @@
       "wga:amplitude": 34.81396541882455
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:aoihit:0",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:aoihit:0",
       "@type": "wga:AOIHit",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:aoi": {
         "@id": "urn:wga:aoi:bar-q4"
       },
       "wga:aoiLabel": "T4",
       "wga:atEvent": 0,
-      "wga:timeRel": 2788.9
+      "wga:timeRel": 2788.9,
+      "wga:sourceModule": "post_processing"
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:aoihit:1",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:aoihit:1",
       "@type": "wga:AOIHit",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:aoi": {
         "@id": "urn:wga:aoi:bar-q1"
       },
       "wga:aoiLabel": "T1",
       "wga:atEvent": 1,
-      "wga:timeRel": 2805.6
+      "wga:timeRel": 2805.6,
+      "wga:sourceModule": "post_processing"
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:interaction:0",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:interaction:0",
       "@type": "wga:Interaction",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:interactionType": "session_start",
       "wga:timeRel": 16.7,
@@ -236,10 +238,10 @@
       }
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:interaction:1",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:interaction:1",
       "@type": "wga:Interaction",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:interactionType": "tab_change",
       "wga:timeRel": 2822.3,
@@ -248,10 +250,10 @@
       }
     },
     {
-      "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086:interaction:2",
+      "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57:interaction:2",
       "@type": "wga:Interaction",
       "wga:inSession": {
-        "@id": "urn:wga:session:4622a489-075b-40bf-8be0-bfdd5900d086"
+        "@id": "urn:wga:session:d0692057-c50f-4d74-986c-385805025f57"
       },
       "wga:interactionType": "session_stop",
       "wga:timeRel": 2839,

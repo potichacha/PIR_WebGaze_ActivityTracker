@@ -91,6 +91,7 @@ fixations/saccades, capture). Aucune webcam requise — les API navigateur sont 
 │   ├── gaze-engine/        Moteur MediaPipe : features iris + ridge (MediaPipeEngine)
 │   ├── calibration/        Calibration, filtres, I-DT/I-VT (Calibration)
 │   ├── logger/             Journalisation + export JSON/JSON-LD (GazeLogger)
+│   ├── gaze-viz/           Heatmap + scanpath du regard en fin de session (GazeViz)
 │   ├── barchart/ linechart/ scatterchart/   Visualisations de démonstration
 ├── tests/                  Tests unitaires Node (326 tests)
 ├── docs/

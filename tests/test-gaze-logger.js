@@ -123,6 +123,84 @@ Logger.logEvent({ type: 'fixation' });
 assert(Logger.export().raw_gaze_data.length === 0, 'logRawPoint sans session ignoré');
 assert(Logger.export().interactions.length === 0, 'logInteraction sans session ignoré');
 
+// ─────────────────────────────────────────────────────────────────────────────
+section('Test 10 : point de regard enrichi (confiance, module, DOM, viz_state)');
+Logger.clear();
+Logger.init('P02', null);
+Logger.setModule('webgazer');
+assert(Logger.getModule() === 'webgazer', 'setModule/getModule');
+const fakeEl = {
+  nodeType: 1, tagName: 'rect', id: '', classList: ['bar', 'bar-q3'],
+  dataset: { aoiType: 'bar', value: '42' },
+  getBoundingClientRect: () => ({ left: 10, top: 20, width: 30, height: 40 }),
+  textContent: 'T3', getAttribute: () => null, parentElement: null,
+};
+const dom = Logger.describeDom(fakeEl);
+assert(dom.semantic_type === 'bar', 'describeDom : type sémantique = bar');
+assert(dom.text === 'T3', 'describeDom : texte capturé');
+assert(dom.data.value === '42', 'describeDom : data-* capturés');
+assert(dom.bbox.width === 30, 'describeDom : bbox capturée');
+assert(dom.css_selector === 'rect.bar.bar-q3', 'describeDom : sélecteur CSS');
+assert(Logger.describeDom(null) === null, 'describeDom(null) → null');
+
+const vs = { active_view: 'bar', dataset: 'd1', zoom: 1, current_aoi: 'bar-q3' };
+Logger.logRawPoint(500, 300, 1700, { confidence: 0.87, source_module: 'webgazer', raw_x: 480, raw_y: 310, dom: dom, viz_state: vs });
+const rp = Logger.export().raw_gaze_data[0];
+assert(rp.confidence === 0.87, 'confidence loguée');
+assert(rp.source_module === 'webgazer', 'source_module logué');
+assert(rp.raw_x === 480 && rp.raw_y === 310, 'coordonnées brutes loguées');
+assert(rp.dom && rp.dom.semantic_type === 'bar', 'DOM attaché au point');
+assert(rp.viz_state && rp.viz_state.active_view === 'bar', 'viz_state attaché au point');
+// source_module par défaut
+Logger.logRawPoint(1, 1, 2);
+assert(Logger.export().raw_gaze_data[1].source_module === 'webgazer', 'source_module par défaut = module courant');
+
+section('Test 11 : logVizState + section viz_states');
+Logger.logVizState({ active_view: 'line', dataset: 'temp' });
+const exp = Logger.export();
+assert(Array.isArray(exp.viz_states), 'section viz_states présente');
+assert(exp.viz_states.length === 1, 'un état de visu enregistré');
+assert(exp.viz_states[0].state.active_view === 'line', 'état correct');
+assert(Logger.getCurrentVizState().active_view === 'line', 'getCurrentVizState');
+
+section('Test 12 : AOI hit enrichi (DOM + viz_state)');
+Logger.logAOIHit('bar-q3', 'T3', 0, 1700, { source_module: 'post_processing', dom: dom, viz_state: vs });
+const hit = Logger.export().aoi_hits[0];
+assert(hit.source_module === 'post_processing', 'AOI hit : source_module');
+assert(hit.dom.semantic_type === 'bar', 'AOI hit : DOM attaché');
+assert(hit.viz_state.active_view === 'bar', 'AOI hit : viz_state attaché');
+
+section('Test 13 : confiance moyenne dans getStats');
+const stats2 = Logger.getStats();
+assert(typeof stats2.meanConfidence === 'number', 'getStats.meanConfidence calculée');
+assert(stats2.vizStates === 1, 'getStats.vizStates');
+
+section('Test 14 : format_version 1.2.0');
+assert(Logger.FORMAT_VERSION === '1.2.0', 'FORMAT_VERSION = 1.2.0');
+
+section('Test 15 : export CSV');
+Logger.clear();
+Logger.init('P03', null);
+Logger.setModule('mediapipe');
+Logger.logRawPoint(100, 200, 1700, { confidence: 0.9, source_module: 'mediapipe',
+  dom: { semantic_type: 'bar', text: 'T3', id: 'b1' }, viz_state: { active_view: 'bar', dataset: 'd', current_aoi: 'bar-q3' } });
+Logger.logRawPoint(150, 250, 1701, { confidence: 0.4 });
+const csv = Logger.exportCsv();
+const rows = csv.split('\n');
+assert(rows.length === 3, 'CSV : entête + 2 lignes');
+assert(rows[0].indexOf('confidence') !== -1 && rows[0].indexOf('source_module') !== -1, 'entête contient les colonnes clés');
+assert(rows[1].indexOf('bar') !== -1 && rows[1].indexOf('0.9') !== -1, 'ligne 1 : DOM + confiance');
+// Échappement CSV des valeurs à virgule/guillemet
+Logger.logRawPoint(1, 1, 1, { dom: { semantic_type: 'label', text: 'a,b "c"' } });
+const csv2 = Logger.exportCsv();
+assert(csv2.indexOf('"a,b ""c"""') !== -1, 'échappement CSV des caractères spéciaux');
+
+section('Test 16 : confidenceColor');
+assert(/^rgb\(231,76,60\)$/.test(Logger.confidenceColor(0)), 'confiance 0 → rouge');
+assert(/^rgb\(39,174,96\)$/.test(Logger.confidenceColor(1)), 'confiance 1 → vert');
+assert(/^rgb\(230,126,34\)$/.test(Logger.confidenceColor(0.5)), 'confiance 0.5 → orange');
+assert(/^rgb\(/.test(Logger.confidenceColor(null)), 'valeur nulle → couleur neutre valide');
+
 // ═══════════════════════════════════════════════════════════════════════════
 console.log('\n══════════════════════════════════════════════════════');
 console.log(`  Résultats : ${passed} ✓ réussis / ${failed} ✗ échoués`);

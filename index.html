@@ -679,8 +679,8 @@
 <div id="gaze-cursor">
   <svg id="dwell-svg" viewBox="-36 -36 72 72" width="72" height="72"
        style="position:absolute;transform:translate(-50%,-50%);">
-    <!-- Contour principal du cercle loupe -->
-    <circle r="30" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2"/>
+    <!-- Contour principal du cercle loupe (couleur = confiance) -->
+    <circle id="gaze-conf-ring" r="30" fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="3"/>
     <!-- Halo extérieur subtil -->
     <circle r="30" fill="none" stroke="rgba(78,205,196,0.3)" stroke-width="6"/>
     <!-- Point central -->
@@ -707,6 +707,7 @@
 <script src="src/linechart/linechart.js"></script>
 <script src="src/scatterchart/scatterchart.js"></script>
 <script src="src/logger/gaze-logger.js"></script>
+<script src="src/gaze-viz/gaze-viz.js"></script>
 <script src="src/gaze-capture/gaze-capture.js"></script>
 
 <script>
@@ -780,11 +781,24 @@ window.addEventListener('load', async function () {
     await webgazer.setRegression('ridge').setTracker('TFFacemesh').begin();
     webgazer.applyKalmanFilter(true);
     webgazer.removeMouseEventListeners();
-    // Pas de setGazeListener ici — juste le flux caméra pour le positionnement
     _wgStarted = true;
 
-    bar.className = 'ready';
-    statusTxt.textContent = 'Caméra active — positionnez votre visage dans le cadre, puis cliquez "Démarrer la calibration".';
+    // Aperçu du regard : si une calibration existe déjà, on recharge le modèle et
+    // on affiche un point de regard live (sans enregistrer) dès l'accueil, pour
+    // vérifier tout de suite que la calibration marche. Parité avec MediaPipe.
+    var hasProfile = false;
+    try { hasProfile = !!Calibration.getStoredData(); } catch (_) {}
+    if (hasProfile) {
+      try { Calibration.loadProfile(); } catch (_) {}
+      try { Calibration.restoreTrainingData(); } catch (_) {}
+      _startWebgazerPreview();
+      bar.className = 'ready';
+      statusTxt.textContent = 'Aperçu actif — le point rouge suit votre regard. Cliquez "Démarrer la calibration" pour refaire, ou descendez à la démo.';
+    } else {
+      // Pas de setGazeListener ici — juste le flux caméra pour le positionnement
+      bar.className = 'ready';
+      statusTxt.textContent = 'Caméra active — positionnez votre visage dans le cadre, puis cliquez "Démarrer la calibration".';
+    }
   } catch (err) {
     bar.className = 'error';
     statusTxt.textContent = 'Erreur caméra : ' + (err.message || String(err));
@@ -895,6 +909,7 @@ function _startDriftMonitor() {
 
 // ── Calibration start button ──────────────────────────────────────────────────
 document.getElementById('btn-cal-start').addEventListener('click', function () {
+  _stopWebgazerPreview(); // l'aperçu cède la main à la calibration
   const bar = document.getElementById('wg-status-bar');
   bar.className = '';
   document.getElementById('wg-status-text').textContent = 'Démarrage de WebGazer…';
@@ -956,6 +971,10 @@ document.querySelectorAll('#demo-nav button').forEach(function (btn) {
     }
 
     _resetDwell();
+    // L'état de la visualisation change → on en logue un instantané.
+    setTimeout(function () {
+      if (GazeLogger.isInitialized()) GazeLogger.logVizState(_currentVizState());
+    }, 0);
     [BarChart, LineChart, ScatterChart].forEach(function (c) { c.setGazeMode(false); });
 
     if (btn.dataset.tab === 'tab-barchart') {
@@ -977,10 +996,41 @@ document.querySelectorAll('#demo-nav button').forEach(function (btn) {
 BarChart.init('bar-chart-container');
 ScatterChart.init('scatter-chart-container');
 
+// Tout changement de zoom/filtre du graphique est journalisé (état de la visu).
+if (typeof BarChart.onStateChange === 'function') {
+  BarChart.onStateChange(function () {
+    if (GazeLogger.isInitialized()) GazeLogger.logVizState(_currentVizState());
+  });
+}
+
 // ── Gaze cursor elements ──────────────────────────────────────────────────────
 var gazeCursor = document.getElementById('gaze-cursor');
 var dwellRing  = document.getElementById('dwell-ring');
 var RING_CIRC  = 2 * Math.PI * 30;
+
+// ── Aperçu du regard à l'accueil (point live SANS enregistrement) ─────────────
+var _wgPreviewOn = false;
+var _wgPreviewListener = null;
+function _startWebgazerPreview() {
+  if (_wgPreviewOn || typeof webgazer === 'undefined') return;
+  _wgPreviewOn = true;
+  Calibration.resetSmoothing();
+  _wgPreviewListener = function (data) {
+    if (!data) return;
+    var c = Calibration.smoothPrediction(data.x, data.y, Date.now());
+    if (!c) return;
+    gazeCursor.style.display = 'block';
+    gazeCursor.style.left = c.x + 'px';
+    gazeCursor.style.top  = c.y + 'px';
+  };
+  try { webgazer.setGazeListener(_wgPreviewListener); } catch (_) {}
+}
+function _stopWebgazerPreview() {
+  if (!_wgPreviewOn) return;
+  _wgPreviewOn = false;
+  _wgPreviewListener = null;
+  try { webgazer.clearGazeListener(); } catch (_) {}
+}
 
 function _setDwellRing(progress) {
   var filled = Math.min(progress, 1) * RING_CIRC;
@@ -1045,6 +1095,62 @@ var _gazeModeOn = false;
 var _lastGaze   = null;
 var _demoStatus = document.getElementById('demo-webcam-status');
 
+// ── Confiance de la prédiction WebGazer ──────────────────────────────────────
+// WebGazer n'expose pas un score unique standard. On le dérive de façon défensive :
+// (1) regression.getConfidence si disponible, sinon (2) présence/qualité des
+// eyeFeatures (yeux détectés), borné dans [0,1].
+function _webgazerConfidence(data) {
+  try {
+    var regs = webgazer.getRegression ? webgazer.getRegression() : null;
+    if (regs && regs[0] && typeof regs[0].getConfidence === 'function') {
+      var c = regs[0].getConfidence();
+      if (typeof c === 'number' && isFinite(c)) return Math.max(0, Math.min(1, c));
+    }
+  } catch (_) {}
+  // Proxy : si les deux yeux sont détectés et non clignés → confiance haute.
+  try {
+    var ef = data && data.eyeFeatures;
+    if (ef && ef.left && ef.right) {
+      var lblink = ef.left.blink ? 0.4 : 0;
+      var rblink = ef.right.blink ? 0.4 : 0;
+      return Math.max(0, 1 - lblink - rblink);
+    }
+  } catch (_) {}
+  return data ? 0.5 : 0; // valeur neutre si aucune info
+}
+
+// ── État courant de la visualisation (vue, dataset, sélection, hover…) ────────
+function _currentVizState() {
+  var view = _activeChart === LineChart ? 'line'
+           : _activeChart === ScatterChart ? 'scatter' : 'bar';
+  var datasetName = view === 'bar' ? 'ventes_trimestrielles'
+                  : view === 'line' ? 'temperatures_villes'
+                  : 'pays_indicateurs';
+  // État réel de la visualisation active (zoom + filtres) si exposé par le chart.
+  var chartState = (_activeChart && typeof _activeChart.getState === 'function')
+    ? _activeChart.getState() : null;
+  return {
+    active_view:   view,
+    dataset:       datasetName,
+    gaze_mode:     _gazeModeOn,
+    current_aoi:   _dwell ? _dwell.aoiId : null,
+    selection:     _dwell && _dwell.aoiId ? _dwell.aoiId : null,
+    zoom:          chartState ? chartState.zoom : 1,
+    filters:       chartState ? chartState.hidden_quarters : [],
+    chart_state:   chartState,
+    n_aois:        _getInteractiveAOIs().length,
+    viewport:      { width: window.innerWidth, height: window.innerHeight },
+  };
+}
+
+// ── Élément DOM réellement sous le regard (par-delà les AOI calculées) ────────
+function _domUnderGaze(x, y) {
+  try {
+    var el = document.elementFromPoint(x, y);
+    return el ? GazeLogger.describeDom(el) : null;
+  } catch (_) { return null; }
+}
+
 function _gazeListener(data) {
   if (!data) {
     if (_lastGaze) {
@@ -1054,6 +1160,7 @@ function _gazeListener(data) {
     return;
   }
   var ts = Date.now();
+  var confidence = _webgazerConfidence(data);
   // Pipeline temps réel : lissage One Euro + correction spatiale (un seul appel).
   var corrected = Calibration.smoothPrediction(data.x, data.y, ts);
   if (!corrected) return;
@@ -1061,9 +1168,21 @@ function _gazeListener(data) {
   _lastGaze = { x: x, y: y };
   gazeCursor.style.left = x + 'px';
   gazeCursor.style.top  = y + 'px';
+  // Couleur de l'anneau du curseur = confiance de la prédiction.
+  var _confRing = document.getElementById('gaze-conf-ring');
+  if (_confRing) _confRing.setAttribute('stroke', GazeLogger.confidenceColor(confidence));
 
-  // Log point brut
-  if (GazeLogger.isInitialized()) GazeLogger.logRawPoint(x, y, ts);
+  // Log point brut enrichi : confiance, module, DOM observé, état de la visu.
+  if (GazeLogger.isInitialized()) {
+    GazeLogger.logRawPoint(x, y, ts, {
+      confidence:    confidence,
+      source_module: 'webgazer',
+      raw_x:         data.x,
+      raw_y:         data.y,
+      dom:           _domUnderGaze(x, y),
+      viz_state:     _currentVizState(),
+    });
+  }
 
   var aois = _getInteractiveAOIs();
   var hit  = aois.find(function (a) {
@@ -1074,6 +1193,7 @@ function _gazeListener(data) {
 }
 
 async function _startGaze() {
+  _stopWebgazerPreview(); // l'aperçu cède la main au suivi enregistré
   document.getElementById('btn-demo-start').disabled = true;
   document.getElementById('btn-demo-export').disabled = true;
   document.getElementById('demo-session-stats').textContent = '';
@@ -1089,7 +1209,9 @@ async function _startGaze() {
       mean_error_px: calStored.meanError,
       std_error_px:  calStored.stdError || null,
     } : null);
-    GazeLogger.logInteraction('session_start', { source: 'btn-demo-start' });
+    GazeLogger.setModule('webgazer');
+    GazeLogger.logInteraction('session_start', { source: 'btn-demo-start', source_module: 'webgazer' });
+    GazeLogger.logVizState(_currentVizState());
 
     if (!_wgStarted) {
       webgazer.saveDataAcrossSessions(false);
@@ -1182,12 +1304,23 @@ document.getElementById('btn-demo-stop').addEventListener('click', function () {
         return f.x_center >= a.x && f.x_center <= a.x + a.width &&
                f.y_center >= a.y && f.y_center <= a.y + a.height;
       });
-      if (hit) GazeLogger.logAOIHit(hit.id, hit.label, idx, f.start_time);
+      if (hit) {
+        // Descripteur DOM détaillé de l'objet fixé + état de la visu au centre.
+        var domEl = _domUnderGaze(f.x_center, f.y_center);
+        GazeLogger.logAOIHit(hit.id, hit.label, idx, f.start_time, {
+          source_module: 'post_processing',
+          dom:           domEl,
+          viz_state:     _currentVizState(),
+        });
+      }
     });
 
     var stats = GazeLogger.getStats();
     document.getElementById('demo-session-stats').textContent =
       stats.fixations + ' fix · ' + stats.saccades + ' sacc · ' + stats.aoiHits + ' AOI hits';
+
+    // Visualisation du parcours du regard (heatmap + scanpath + fixations).
+    try { GazeViz.show(GazeLogger.export()); } catch (_) {}
   }
 
   document.getElementById('btn-demo-export').disabled = false;
@@ -1199,9 +1332,10 @@ document.getElementById('btn-demo-calibrate').addEventListener('click', function
 
 document.getElementById('btn-demo-export').addEventListener('click', function () {
   if (!GazeLogger.isInitialized()) return;
-  GazeLogger.logInteraction('export', { formats: ['json', 'jsonld'] });
+  GazeLogger.logInteraction('export', { formats: ['json', 'jsonld', 'csv'] });
   GazeLogger.download();        // format JSON tabulaire
   GazeLogger.downloadJsonLd();  // format JSON-LD (graphe de connaissances)
+  GazeLogger.downloadCsv();     // format CSV (analyse tabulaire)
 });
 
 document.getElementById('btn-demo-aois').addEventListener('click', function () {

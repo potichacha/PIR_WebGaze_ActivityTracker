@@ -4,8 +4,13 @@ Ce document décrit le format structuré d'export d'une session de suivi du rega
 Le schéma formel (validable) se trouve dans
 [`schema/session.schema.json`](../schema/session.schema.json) (JSON Schema draft-07).
 
-- **Version du format** : `1.1.0` (`session.format_version`).
+- **Version du format** : `1.2.0` (`session.format_version`).
 - **Producteur** : `GazeLogger.export()` (JSON) et `GazeLogger.exportJsonLd()` (JSON-LD).
+
+> **Nouveautés v1.2.0** (demandes encadrante PIR) : confiance de prédiction et
+> `source_module` sur chaque point de regard, descripteur DOM détaillé de l'objet
+> observé, état de la visualisation (`viz_state` + section `viz_states`), et
+> `source_module` sur toutes les entrées pour identifier le module émetteur.
 
 ---
 
@@ -63,17 +68,45 @@ indispensable pour **reproduire ou comparer** deux sessions a posteriori.
 
 ## 3. `raw_gaze_data` — points de regard
 
-Un point par frame WebGazer, **après** correction spatiale et lissage.
+Un point par frame, **après** correction spatiale et lissage, enrichi de tout le
+contexte disponible.
 
 ```json
-{ "x": 812, "y": 437, "timestamp": 1750599611123, "t_rel_ms": 4502.1 }
+{
+  "x": 812, "y": 437, "raw_x": 800, "raw_y": 440,
+  "timestamp": 1750599611123, "t_rel_ms": 4502.1,
+  "confidence": 0.87, "source_module": "webgazer",
+  "dom": { "tag": "rect", "semantic_type": "bar", "text": "T3",
+           "bbox": { "x": 1080, "y": 290, "width": 60, "height": 220 },
+           "data": { "aoiType": "bar", "value": "42" }, "css_selector": "rect.bar.bar-q3" },
+  "viz_state": { "active_view": "bar", "dataset": "ventes_trimestrielles",
+                 "current_aoi": "bar-q3", "zoom": 1, "filters": [] }
+}
 ```
 
 | Champ | Type | Description |
 |-------|------|-------------|
-| `x`, `y` | number | Coordonnées écran en pixels. |
-| `timestamp` | number | Epoch ms. |
-| `t_rel_ms` | number | Temps relatif monotone. |
+| `x`, `y` | number | Coordonnées écran corrigées (px). |
+| `raw_x`, `raw_y` | number | Coordonnées brutes avant correction. |
+| `timestamp` / `t_rel_ms` | number | Horloges epoch / monotone. |
+| `confidence` | number | Confiance de la prédiction ∈ [0,1]. |
+| `source_module` | string | `webgazer` ou `mediapipe`. |
+| `dom` | object | Descripteur de l'objet DOM observé (cf. §6bis). |
+| `viz_state` | object | État de la visualisation au moment du regard (cf. §6ter). |
+
+### 3bis. Descripteur DOM (`dom`)
+
+Identifie précisément l'objet regardé (barre, axe, point, légende…) :
+`tag`, `id`, `classes`, **`semantic_type`** (bar/axis/legend/point/line/label),
+`bbox`, `text`, `aria_label`, `data` (attributs `data-*`), `css_selector`.
+Produit par `GazeLogger.describeDom(element)`.
+
+### 3ter. État de la visualisation (`viz_state` et section `viz_states`)
+
+`active_view` (bar/line/scatter), `dataset`, `gaze_mode`, `current_aoi`,
+`selection`, `zoom`, `filters`, `n_aois`, `viewport`. Chaque point de regard et
+chaque hit AOI porte un instantané ; la section `viz_states[]` journalise en plus
+chaque changement d'état (changement d'onglet…) avec horodatage.
 
 ---
 
