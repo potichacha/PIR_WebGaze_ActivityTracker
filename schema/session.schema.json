@@ -42,6 +42,12 @@
         "id":             { "type": "string", "description": "UUID v4 de la session." },
         "format_version": { "type": "string", "description": "Version du format d'export (semver)." },
         "participant_id": { "type": "string" },
+        "first_name":     { "type": ["string", "null"] },
+        "last_name":      { "type": ["string", "null"] },
+        "glasses":        { "type": ["string", "null"], "description": "non | lunettes | lentilles." },
+        "age":            { "type": ["number", "string", "null"] },
+        "lighting":       { "type": ["string", "null"] },
+        "engine":         { "type": ["string", "null"], "description": "webgazer | mediapipe." },
         "start_time":     { "type": "string", "format": "date-time" },
         "end_time":       { "type": ["string", "null"], "format": "date-time" },
         "clock_origin_ms": {
@@ -84,7 +90,10 @@
         "timestamp": { "type": "number", "description": "Epoch ms (Date.now())." },
         "t_rel_ms":  { "type": "number", "description": "Temps relatif à clock_origin_ms (horloge monotone)." },
         "confidence":{ "type": "number", "description": "Confiance de la prédiction ∈ [0,1]." },
+        "lux":       { "type": "number", "description": "Luminosité ambiante mesurée (lux)." },
         "source_module": { "type": "string", "description": "Moteur émetteur : 'webgazer' | 'mediapipe'." },
+        "test_case_id":  { "type": "string", "description": "Identifiant du stimulus du test guidé en cours." },
+        "target_aoi_id": { "type": "string", "description": "AOI ciblée par le stimulus (cercle rouge)." },
         "dom":       { "$ref": "#/definitions/domDescriptor" },
         "viz_state": { "$ref": "#/definitions/vizState" }
       }

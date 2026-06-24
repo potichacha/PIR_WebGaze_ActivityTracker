@@ -61,7 +61,7 @@ mouvements de tête, validation par leave-one-out), un post-traitement extrayant
 intégration ultérieure dans un graphe de connaissances. Deux moteurs de regard
 interchangeables sont proposés au choix de l'utilisateur (WebGazer.js et un moteur
 maison fondé sur MediaPipe FaceLandmarker). La validation logicielle
-s'appuie sur 420 tests unitaires automatisés. Ce document constitue une première
+s'appuie sur 465 tests unitaires automatisés. Ce document constitue une première
 version~: la section d'évaluation utilisateur (3--5 participants) présente le
 protocole et un cadre d'analyse à compléter par les données réelles.
 \end{abstract}
@@ -323,6 +323,12 @@ permettant de décrire \emph{ce que l'utilisateur regardait}~:
   enregistre en plus chaque changement d'état (zoom, filtre par trimestre, onglet).
 \end{itemize}
 
+Chaque point porte en outre la \textbf{luminosité ambiante} (\code{lux}, mesurée par
+l'API \textit{AmbientLightSensor} ou estimée depuis la webcam) et, pendant un test
+guidé, le \textbf{contexte du stimulus} (\code{test\_case\_id}, \code{target\_aoi\_id}).
+La session enregistre les informations participant (\code{first\_name},
+\code{last\_name}, \code{glasses}, \code{engine}). Le format est versionné (v1.3).
+
 Trois formats d'export sont fournis~: \textbf{JSON} (structuré), \textbf{JSON-LD}
 (graphe de connaissances) et \textbf{CSV} (analyse tabulaire directe sous
 pandas/R/Excel).
@@ -338,53 +344,62 @@ connaissances de l'\textit{Activity Tracker}.
 % ═════════════════════════════════════════════════════════════════════════════
 \section{T5 — Évaluation avec participants}
 
-\subsection{Protocole}
+\subsection{Protocole — session de test guidée et automatique}
 
-Le protocole (détaillé dans \code{TEST\_PROTOCOL.md}) prévoit 3 à 5 participants.
-Chaque session enchaîne~: fiche participant, positionnement, calibration (25
-points) et validation (9 points), puis des tâches d'analyse sur trois
-visualisations (\textit{bar chart}, \textit{line chart}, \textit{scatter plot}),
-et enfin l'export des données et un court questionnaire de ressenti.
+Une page dédiée (\code{test-session.html}) implémente un protocole \textbf{entièrement
+guidé et automatique}, sans aucune action de l'utilisateur pendant le test~:
+\begin{enumerate}[leftmargin=1.5em]
+  \item \textbf{Formulaire participant}~: prénom, nom, port de lunettes.
+  \item \textbf{Calibration} puis lancement automatique du scénario.
+  \item \textbf{Scénario}~: enchaînement automatique des trois visualisations
+  (page~1 bar chart, page~2 line chart, page~3 scatter). Sur chaque page, un
+  \textbf{cercle rouge} « regardez ici » apparaît successivement sur des AOI réelles
+  (barre, axe, point\dots), avec un compte à rebours~; le participant n'a qu'à
+  suivre la cible du regard. Chaque point est étiqueté avec le stimulus et l'AOI
+  cible (\code{test\_case\_id}, \code{target\_aoi\_id}).
+  \item \textbf{Résultats}~: post-traitement, enregistrement de la session et
+  affichage d'un récapitulatif + parcours du regard.
+\end{enumerate}
+Un \textbf{retour visage permanent} (visage détecté, distance, luminosité) reste
+affiché en continu, y compris pendant le test, pour signaler tout problème de
+captation. Chaque session produit \textbf{un fichier JSON par personne} et est
+persistée localement pour reconsultation.
 
-\paragraph{Mesures collectées.} Erreur moyenne et leave-one-out de calibration
-(px), erreur par quadrant, pourcentage d'échantillons dans la zone acceptable,
-fréquence d'échantillonnage (Hz), dérive estimée, nombre de fixations/saccades,
-et ressenti subjectif (échelles 1--5).
+\paragraph{Mesures collectées.} Erreur de calibration (px), luminosité (lux),
+confiance moyenne, nombre de fixations/saccades, hits AOI, et — grâce à
+l'étiquetage des stimuli — la correspondance entre l'AOI ciblée et l'objet
+réellement regardé.
 
-\subsection{Jeux de données et cadre d'analyse}
+\paragraph{À compléter.} Les sessions réelles (3--5 participants) seront collectées
+via cette page et consultées dans le visualiseur (§\ref{sec:viewer})~: tableau
+récapitulatif par participant (nom, date, lunettes, lux, erreur de calibration),
+distribution des erreurs et synthèse qualitative.
 
-En l'absence de sessions réelles dans cette première version, trois sessions
-\textbf{simulées} (bruit de 18, 35 et 60\,px) ont été générées avec la chaîne de
-post-traitement réelle, pour illustrer le format et le pipeline
-(tableau~\ref{tab:sim}). On observe l'effet attendu~: dégrader la qualité de
-calibration effondre le nombre de fixations détectables, illustration concrète
-d'une limite pratique de l'approche webcam.
+% ═════════════════════════════════════════════════════════════════════════════
+\section{Visualisation et consultation des sessions}
+\label{sec:viewer}
 
-\begin{table}[h]
-\centering
-\begin{tabular}{l r r r r}
-\toprule
-\textbf{Session (bruit)} & \textbf{Points} & \textbf{Fixations} & \textbf{Saccades} & \textbf{AOI} \\
-\midrule
-SIM-P01 (18\,px) & 255 & 23 & 44 & 23 \\
-SIM-P02 (35\,px) & 196 & 18 & 36 & 18 \\
-SIM-P03 (60\,px) & 165 & 2  & 13 & 2  \\
-\bottomrule
-\end{tabular}
-\caption{Sessions simulées — effet de la qualité de calibration sur la détection.
-\emph{Données synthétiques, à remplacer par les sessions réelles.}}
-\label{tab:sim}
-\end{table}
-
-\paragraph{À compléter.} Cette section sera enrichie des résultats des 3--5
-participants réels~: tableau récapitulatif par participant, distribution des
-erreurs de calibration, et synthèse qualitative des questionnaires.
+Une sous-page \code{session-viewer.html} permet de \textbf{consulter et comparer}
+les sessions enregistrées sans relancer de test. Les sessions étant persistées
+localement (le projet étant statique, \code{localStorage} sert de base de données ;
+un export/import fichier permet l'archivage et le transfert), la page affiche~:
+\begin{itemize}[leftmargin=1.4em]
+  \item un \textbf{tableau} de toutes les sessions (date, participant, lunettes,
+  moteur, erreur de calibration en px, luminosité, confiance moyenne, nombre de
+  points/fixations/saccades/hits AOI)~;
+  \item pour la session sélectionnée~: une \textbf{chronologie} (fixations,
+  saccades, stimuli), un \textbf{scanpath} et une \textbf{heatmap} du regard ;
+  \item l'\textbf{export} par session (JSON, CSV) et global (import/export de la
+  base).
+\end{itemize}
+La \textbf{heatmap} et le \textbf{scanpath} (cercles de fixation $\propto$ durée,
+reliés dans l'ordre temporel) sont aussi affichés en plein écran en fin de session.
 
 % ═════════════════════════════════════════════════════════════════════════════
 \section{Validation logicielle}
 
 La logique métier (algorithmes I-DT/I-VT, filtres, correction spatiale, format de
-log) est couverte par \textbf{420 tests unitaires} automatisés (Node, sans webcam),
+log) est couverte par \textbf{465 tests unitaires} automatisés (Node, sans webcam),
 exécutables par \code{npm test}. Ils vérifient notamment~: la correction unique
 (non sur-corrigée), la validation leave-one-out, le lissage One Euro, la robustesse
 des détecteurs sur cas limites, et la performance ($<$50\,ms sur 10\,000 points).

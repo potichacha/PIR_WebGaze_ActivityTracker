@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebGaze — Session de test guidée</title>
+  <script>
+    // Aligne WebGazer sur le viewport réel (cohérence des coordonnées).
+    (function () { try { /* no-op placeholder for screen patch parity */ } catch (_) {} })();
+  </script>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/webgazer@2.1.0/dist/webgazer.min.js" defer></script>
+
+  <link rel="stylesheet" href="src/barchart/barchart.css" />
+  <link rel="stylesheet" href="src/linechart/linechart.css" />
+  <link rel="stylesheet" href="src/scatterchart/scatterchart.css" />
+  <style>
+    :root { --bg:#0f0f1a; --panel:#16213e; --accent:#4ecdc4; --accent2:#6c8cff; --text:#eee; --muted:#9aa6c0; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:'Segoe UI',Arial,sans-serif; overflow:hidden;
+      -webkit-user-select:none; -moz-user-select:none; user-select:none; }
+    input, textarea, select { -webkit-user-select:text; user-select:text; }
+    header { padding:12px 22px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(120,140,200,0.18); }
+    header h1 { font-size:1.05rem; margin:0; } header a { margin-left:auto; color:var(--muted); text-decoration:none; font-size:.85rem; }
+    .chart-area { padding:14px 22px; height:calc(100vh - 56px); }
+    .tab-panel { display:none; height:100%; } .tab-panel.active { display:block; height:100%; }
+    /* Overlay générique (formulaire, calibration, résultats) */
+    #ts-overlay { position:fixed; inset:0; background:#1a1a2e; z-index:9999; display:none; }
+    #ts-overlay.on { display:block; }
+    .ts-center { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); text-align:center; color:#eee; width:92%; max-width:520px; }
+    .ts-card { background:#16213e; border-radius:16px; padding:30px 36px; }
+    .ts-card h2 { margin:0 0 18px; color:var(--accent); }
+    .ts-field { margin-bottom:14px; text-align:left; }
+    .ts-field label { display:block; font-size:.82rem; color:var(--muted); margin-bottom:5px; }
+    .ts-input { width:100%; background:#0d1b2a; border:1px solid #2c3e50; border-radius:8px; color:#eee; padding:10px 12px; font-size:.92rem; }
+    .ts-radios { display:flex; gap:16px; }
+    .ts-btn { background:var(--accent); color:#0f0f1a; border:none; border-radius:9px; padding:12px 22px; font-weight:700; cursor:pointer; font-size:.95rem; }
+    .ts-btn.alt { background:var(--accent2); color:#fff; }
+    .ts-btn:disabled { opacity:.45; cursor:not-allowed; }
+    /* Cible rouge "regardez ici" */
+    #ts-target { position:fixed; width:60px; height:60px; border-radius:50%; z-index:9500; pointer-events:none;
+      transform:translate(-50%,-50%); display:none;
+      background:radial-gradient(circle at 50% 50%, rgba(231,76,60,.95), rgba(231,76,60,.35) 60%, transparent 72%);
+      box-shadow:0 0 24px 8px rgba(231,76,60,.5); }
+    #ts-target.pulse { animation:tspulse 1s ease-in-out infinite; }
+    @keyframes tspulse { 0%,100%{transform:translate(-50%,-50%) scale(1);} 50%{transform:translate(-50%,-50%) scale(1.25);} }
+    #ts-target-ring { position:fixed; z-index:9499; pointer-events:none; transform:translate(-50%,-50%); display:none; }
+    #ts-banner { position:fixed; top:14px; left:50%; transform:translateX(-50%); z-index:9501; background:rgba(15,15,26,.9);
+      border:1px solid rgba(231,76,60,.5); border-radius:10px; padding:8px 18px; font-size:.95rem; color:#eee; display:none; }
+    /* Retour visage PERMANENT (toujours visible) */
+    #face-widget { position:fixed; bottom:14px; right:14px; z-index:9600; width:200px; background:rgba(15,15,26,.92);
+      border:1px solid rgba(78,205,196,.4); border-radius:12px; padding:10px 12px; font-size:.78rem; color:#ddd;
+      transition:right .35s, left .35s; }
+    #face-widget .fw-row { display:flex; justify-content:space-between; margin:3px 0; }
+    #face-widget .fw-dot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:5px; }
+    #gaze-cursor { position:fixed; width:22px; height:22px; border-radius:50%; border:2px solid var(--accent);
+      background:rgba(78,205,196,.12); transform:translate(-50%,-50%); pointer-events:none; z-index:9400; display:none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>WebGaze — Session de test guidée</h1>
+    <span id="ts-status" style="font-size:.82rem;color:var(--muted);"></span>
+    <a href="choose.html">← Accueil</a>
+  </header>
+
+  <div class="chart-area">
+    <div id="tab-bar" class="tab-panel active"><div id="bar-chart-container" style="height:100%;"></div></div>
+    <div id="tab-line" class="tab-panel"><div id="line-chart-container" style="height:100%;"></div></div>
+    <div id="tab-scatter" class="tab-panel"><div id="scatter-chart-container" style="height:100%;"></div></div>
+  </div>
+
+  <div id="gaze-cursor"></div>
+  <div id="ts-target"></div>
+  <svg id="ts-target-ring" width="84" height="84"><circle cx="42" cy="42" r="38" fill="none" stroke="#e74c3c" stroke-width="4" stroke-dasharray="239" stroke-dashoffset="239" transform="rotate(-90 42 42)"/></svg>
+  <div id="ts-banner">Regardez le cercle rouge</div>
+
+  <!-- Retour visage permanent -->
+  <div id="face-widget">
+    <div style="font-weight:bold;color:var(--accent);margin-bottom:5px;">Retour visage</div>
+    <div class="fw-row"><span><span class="fw-dot" id="fw-face-dot" style="background:#888"></span>Visage</span><span id="fw-face">—</span></div>
+    <div class="fw-row"><span><span class="fw-dot" id="fw-dist-dot" style="background:#888"></span>Distance</span><span id="fw-dist">—</span></div>
+    <div class="fw-row"><span><span class="fw-dot" id="fw-lux-dot" style="background:#888"></span>Luminosité</span><span id="fw-lux">—</span></div>
+  </div>
+
+  <!-- Overlay formulaire / calibration / résultats -->
+  <div id="ts-overlay"></div>
+
+  <script src="src/calibration/calibration.js?v=ts"></script>
+  <script src="src/logger/gaze-logger.js"></script>
+  <script src="src/session-store/session-store.js"></script>
+  <script src="src/ambient-light/ambient-light.js"></script>
+  <script src="src/gaze-viz/gaze-viz.js"></script>
+  <script src="src/results-view/results-view.js"></script>
+  <script src="src/barchart/barchart.js"></script>
+  <script src="src/linechart/linechart.js"></script>
+  <script src="src/scatterchart/scatterchart.js"></script>
+
+  <script>
+  (function () {
+    'use strict';
+    var overlay = document.getElementById('ts-overlay');
+    var cursor  = document.getElementById('gaze-cursor');
+    var target  = document.getElementById('ts-target');
+    var ring    = document.getElementById('ts-target-ring');
+    var ringCircle = ring.querySelector('circle');
+    var banner  = document.getElementById('ts-banner');
+    function setStatus(t){ document.getElementById('ts-status').textContent = t || ''; }
+    function showTab(id){
+      document.querySelectorAll('.tab-panel').forEach(function(p){ p.classList.remove('active'); });
+      document.getElementById(id).classList.add('active');
+    }
+
+    BarChart.init('bar-chart-container');
+
+    var _session = null, _wgStarted = false;
+
+    // ── Retour visage permanent (visage / distance / luminosité) ────────────────
+    function color(ok){ return ok ? '#27ae60' : '#e0a96a'; }
+    setInterval(function () {
+      var faceOk = false, distLabel = '—', distOk = false;
+      try {
+        // WebGazer expose le tracker FaceMesh : présence = visage détecté.
+        var t = (typeof webgazer !== 'undefined' && webgazer.getTracker) ? webgazer.getTracker() : null;
+        var pos = t && t.getPositions ? t.getPositions() : null;
+        faceOk = !!(pos && pos.length);
+        if (faceOk) {
+          // Largeur du visage (écart yeux approx via étendue x des points) → distance.
+          var xs = pos.map(function(p){ return Array.isArray(p)?p[0]:p.x; }).filter(Number.isFinite);
+          if (xs.length) {
+            var span = Math.max.apply(null, xs) - Math.min.apply(null, xs);
+            distOk = span > 90 && span < 260;
+            distLabel = distOk ? '✓ ~60 cm' : (span <= 90 ? '↔ rapprochez' : '↔ éloignez');
+          }
+        }
+      } catch (_) {}
+      document.getElementById('fw-face').textContent = faceOk ? 'détecté' : 'non détecté';
+      document.getElementById('fw-face-dot').style.background = color(faceOk);
+      document.getElementById('fw-dist').textContent = distLabel;
+      document.getElementById('fw-dist-dot').style.background = color(distOk);
+      var lux = (window.AmbientLight && AmbientLight.getLux()) ;
+      var luxOk = lux != null && lux >= 80 && lux <= 700;
+      document.getElementById('fw-lux').textContent = lux != null ? (lux + ' lux') : '—';
+      document.getElementById('fw-lux-dot').style.background = color(luxOk);
+    }, 500);
+
+    // ── Étape 1 : formulaire participant (nom, prénom, lunettes) ────────────────
+    function showForm() {
+      overlay.classList.add('on');
+      overlay.innerHTML =
+        '<div class="ts-center"><div class="ts-card">'
+        + '<h2>Nouvelle session de test</h2>'
+        + '<div class="ts-field"><label>Prénom *</label><input id="f-first" class="ts-input" placeholder="Prénom"></div>'
+        + '<div class="ts-field"><label>Nom *</label><input id="f-last" class="ts-input" placeholder="Nom"></div>'
+        + '<div class="ts-field"><label>Porte des lunettes / lentilles ?</label>'
+        + '<div class="ts-radios">'
+        + '<label><input type="radio" name="f-gl" value="non" checked> Non</label>'
+        + '<label><input type="radio" name="f-gl" value="lunettes"> Lunettes</label>'
+        + '<label><input type="radio" name="f-gl" value="lentilles"> Lentilles</label>'
+        + '</div></div>'
+        + '<div id="f-err" style="color:#e74c3c;font-size:.82rem;margin-bottom:10px;display:none;">Prénom et nom obligatoires.</div>'
+        + '<button id="f-go" class="ts-btn alt" style="width:100%;">Commencer (calibration) →</button>'
+        + '</div></div>';
+      document.getElementById('f-go').addEventListener('click', function () {
+        var first = document.getElementById('f-first').value.trim();
+        var last  = document.getElementById('f-last').value.trim();
+        if (!first || !last) { document.getElementById('f-err').style.display = 'block'; return; }
+        var gl = (overlay.querySelector('input[name="f-gl"]:checked') || {}).value || 'non';
+        _session = { first_name: first, last_name: last, glasses: gl,
+          participant_id: (first[0] + last).toLowerCase().replace(/[^a-z0-9]/g,''),
+          engine: 'webgazer' };
+        overlay.classList.remove('on');
+        startCalibration();
+      });
+    }
+
+    // ── Étape 2 : calibration WebGazer (réutilise le module Calibration) ────────
+    function startCalibration() {
+      setStatus('Calibration…');
+      // Démarre l'aperçu caméra + mesure de luminosité dès que possible.
+      try { sessionStorage.setItem('calibration_session', JSON.stringify(_session)); } catch (_) {}
+      Calibration.start(function onComplete(score) {
+        // Lance la mesure de lux à partir du flux WebGazer.
+        var vid = document.getElementById('webgazerVideoFeed') || document.querySelector('video');
+        try { AmbientLight.start(vid); } catch (_) {}
+        startScenario(score);
+      }, { alreadyStarted: _wgStarted });
+    }
+
+    // ── Étape 3 : scénario de test AUTOMATIQUE (aucun clic) ──────────────────────
+    // Pour chaque graphique : on affiche successivement un cercle rouge sur des AOI
+    // réelles, ~3,5 s chacune, avec compte à rebours. Le regard est enregistré avec
+    // test_case_id + target_aoi_id. Enchaînement automatique des 3 pages.
+    var STIM_MS = 3500;
+    function startScenario(calScore) {
+      setStatus('Test en cours…');
+      var cal = Calibration.getStoredData() || {};
+      GazeLogger.init(_session.participant_id, {
+        mean_error_px: cal.meanError != null ? cal.meanError : (calScore && calScore.meanError),
+        std_error_px:  cal.stdError,
+      }, _session);
+      GazeLogger.setModule('webgazer');
+      GazeLogger.logInteraction('test_session_start', { participant: _session });
+
+      // Brancher le regard (curseur + log avec contexte courant).
+      try { webgazer.setGazeListener(_onGaze); } catch (_) {}
+      cursor.style.display = 'block';
+
+      // Construire la séquence de stimuli : (vue, chart, liste d'AOI ciblées).
+      var plan = [
+        { view:'tab-bar',     chart:BarChart,     init:function(){ BarChart.init('bar-chart-container'); },     ids:['bar-Jan','bar-Jun','bar-Déc','y-axis'] },
+        { view:'tab-line',    chart:LineChart,    init:function(){ LineChart.init('line-chart-container'); },    pick:3 },
+        { view:'tab-scatter', chart:ScatterChart, init:function(){ ScatterChart.init('scatter-chart-container'); }, pick:4 },
+      ];
+
+      var pageIdx = 0;
+      function nextPage() {
+        if (pageIdx >= plan.length) { finishScenario(); return; }
+        var page = plan[pageIdx];
+        showTab(page.view);
+        page.init();
+        if (page.chart.setGazeMode) page.chart.setGazeMode(true);
+        // Laisser le chart se rendre, puis récupérer les AOI.
+        setTimeout(function () {
+          var aois = page.chart.getAOIs();
+          var targets;
+          if (page.ids) {
+            targets = page.ids.map(function (id){ return aois.find(function(a){return a.id===id;}); }).filter(Boolean);
+          } else {
+            // Choisir N AOI réparties.
+            var step = Math.max(1, Math.floor(aois.length / (page.pick||3)));
+            targets = [];
+            for (var i=0; i<aois.length && targets.length<(page.pick||3); i+=step) targets.push(aois[i]);
+          }
+          runStimuli(page, targets, 0, function(){ pageIdx++; nextPage(); });
+        }, 700);
+      }
+
+      function runStimuli(page, targets, i, done) {
+        if (i >= targets.length) { done(); return; }
+        var a = targets[i];
+        var cx = a.x + a.width/2, cy = a.y + a.height/2;
+        var caseId = page.view + '-' + (i+1);
+        GazeLogger.setTestContext(caseId, a.id);
+        GazeLogger.logInteraction('stimulus_shown', { test_case_id: caseId, target_aoi_id: a.id, x: Math.round(cx), y: Math.round(cy) });
+
+        target.style.left = cx + 'px'; target.style.top = cy + 'px';
+        target.style.display = 'block'; target.classList.add('pulse');
+        ring.style.left = cx + 'px'; ring.style.top = cy + 'px'; ring.style.display = 'block';
+        banner.textContent = 'Regardez le cercle rouge — ' + (a.label || a.id);
+        banner.style.display = 'block';
+
+        // Compte à rebours visuel (anneau).
+        var start = performance.now();
+        (function tick(now){
+          var p = Math.min((now-start)/STIM_MS, 1);
+          ringCircle.setAttribute('stroke-dashoffset', String(239*(1-p)));
+          if (p < 1) requestAnimationFrame(tick);
+        })(start);
+
+        setTimeout(function () {
+          GazeLogger.clearTestContext();
+          target.classList.remove('pulse');
+          runStimuli(page, targets, i+1, done);
+        }, STIM_MS);
+      }
+
+      nextPage();
+    }
+
+    function _onGaze(data) {
+      if (!data) return;
+      var ts = Date.now();
+      var c = Calibration.smoothPrediction(data.x, data.y, ts);
+      if (!c) return;
+      cursor.style.left = c.x + 'px'; cursor.style.top = c.y + 'px';
+      // confiance WebGazer (proxy via eyeFeatures)
+      var conf = 0.5;
+      try { if (data.eyeFeatures && data.eyeFeatures.left && data.eyeFeatures.right)
+        conf = 1 - (data.eyeFeatures.left.blink?0.4:0) - (data.eyeFeatures.right.blink?0.4:0); } catch (_) {}
+      cursor.style.borderColor = GazeLogger.confidenceColor(conf);
+      var el = document.elementFromPoint(c.x, c.y);
+      GazeLogger.logRawPoint(c.x, c.y, ts, {
+        confidence: conf, source_module: 'webgazer', raw_x: data.x, raw_y: data.y,
+        dom: el ? GazeLogger.describeDom(el) : null,
+        viz_state: { active_view: document.querySelector('.tab-panel.active').id },
+      });
+    }
+
+    // ── Étape 4 : fin → post-traitement, sauvegarde, résultats ──────────────────
+    function finishScenario() {
+      target.style.display = 'none'; ring.style.display = 'none'; banner.style.display = 'none';
+      try { webgazer.clearGazeListener(); } catch (_) {}
+      cursor.style.display = 'none';
+      [BarChart, LineChart, ScatterChart].forEach(function(c){ if(c.setGazeMode) c.setGazeMode(false); });
+
+      var raw = GazeLogger.export().raw_gaze_data;
+      if (raw.length >= 10) {
+        Calibration.detectFixations(raw, 80, 100).forEach(function (f){
+          GazeLogger.logEvent({ type:'fixation', start_time:f.start_time, end_time:f.end_time, duration:f.duration,
+            details:{ x:f.x_center, y:f.y_center, points_count:f.points_count } });
+        });
+        Calibration.detectSaccades(raw, 0.7).forEach(function (s){
+          GazeLogger.logEvent({ type:'saccade', start_time:s.start_time, end_time:s.end_time, duration:s.duration,
+            details:{ amplitude:s.amplitude, peak_velocity:s.peak_velocity } });
+        });
+      }
+      GazeLogger.logInteraction('test_session_end', {});
+      var data = GazeLogger.export();
+      var id = SessionStore.save(data);   // persiste dans la "BDD" locale
+      try { GazeLogger.download(); } catch (_) {}  // + fichier JSON
+
+      var sum = SessionStore.summarize(SessionStore.get(id));
+      setStatus('Session enregistrée.');
+      overlay.classList.add('on');
+      overlay.innerHTML =
+        '<div class="ts-center"><div class="ts-card">'
+        + '<h2>Session terminée ✓</h2>'
+        + '<div style="text-align:left;font-size:.92rem;line-height:1.9;color:#ddd;">'
+        + '<b>' + sum.participant + '</b> — ' + (sum.date||'') + '<br>'
+        + 'Lunettes : ' + (sum.glasses||'—') + '<br>'
+        + 'Calibration : ' + (sum.calib_error_px!=null?sum.calib_error_px+' px':'—') + '<br>'
+        + 'Luminosité médiane : ' + (sum.lux!=null?sum.lux+' lux':'—') + '<br>'
+        + 'Points : ' + sum.n_points + ' · Fixations : ' + sum.n_fixations + ' · Saccades : ' + sum.n_saccades + '<br>'
+        + 'Confiance moyenne : ' + (sum.mean_confidence!=null?sum.mean_confidence:'—') + '</div>'
+        + '<div style="margin-top:20px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap;">'
+        + '<button id="r-results" class="ts-btn alt">Voir les résultats détaillés</button>'
+        + '<a href="session-viewer.html" class="ts-btn" style="background:#4ecdc4;text-decoration:none;display:inline-block;">Consulter les sessions →</a>'
+        + '<button id="r-again" class="ts-btn" style="background:#7f8c8d;color:#fff;">Nouvelle session</button>'
+        + '</div></div></div>';
+      document.getElementById('r-results').addEventListener('click', function(){ overlay.classList.remove('on'); ResultsView.show(data); });
+      document.getElementById('r-again').addEventListener('click', function(){ location.reload(); });
+    }
+
+    // Démarrage : on attend WebGazer puis on montre le formulaire.
+    window.addEventListener('load', function () {
+      var wait = setInterval(function () {
+        if (typeof webgazer !== 'undefined') { clearInterval(wait); showForm(); }
+      }, 150);
+    });
+  })();
+  </script>
+</body>
+</html>

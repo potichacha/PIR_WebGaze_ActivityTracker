@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WebGaze — Sessions enregistrées</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    :root { --bg:#0f0f1a; --panel:#16213e; --accent:#4ecdc4; --accent2:#6c8cff; --text:#eee; --muted:#9aa6c0; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:'Segoe UI',Arial,sans-serif; }
+    header { padding:14px 22px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(120,140,200,0.18); }
+    header h1 { font-size:1.1rem; margin:0; } header a { color:var(--muted); text-decoration:none; font-size:.85rem; }
+    .bar { padding:12px 22px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; border-bottom:1px solid rgba(120,140,200,.12); }
+    button { background:var(--accent2); color:#fff; border:none; border-radius:8px; padding:9px 15px; cursor:pointer; font-size:.85rem; }
+    button.ghost { background:transparent; border:1px solid rgba(120,140,200,.4); color:var(--text); }
+    button.danger { background:#e74c3c; }
+    .wrap { padding:18px 22px; }
+    table { width:100%; border-collapse:collapse; font-size:.86rem; }
+    th, td { padding:8px 10px; text-align:left; border-bottom:1px solid rgba(120,140,200,.14); }
+    th { color:var(--accent); font-weight:600; cursor:default; }
+    tr.sel { background:rgba(108,140,255,.12); }
+    tr.row:hover { background:rgba(120,140,200,.08); cursor:pointer; }
+    .muted { color:var(--muted); }
+    .empty { color:var(--muted); padding:40px; text-align:center; }
+    /* Panneau détail */
+    #detail { margin-top:24px; display:none; }
+    #detail.on { display:block; }
+    .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px 24px; background:var(--panel); border-radius:12px; padding:16px 20px; font-size:.88rem; }
+    .detail-grid b { color:var(--accent); }
+    .viz-row { display:flex; gap:16px; flex-wrap:wrap; margin-top:18px; }
+    .viz-box { background:#0d1424; border:1px solid rgba(120,140,200,.2); border-radius:12px; padding:12px; }
+    .viz-box h3 { margin:0 0 8px; font-size:.92rem; color:var(--accent); }
+    #cmp { color:var(--muted); font-size:.82rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>WebGaze — Sessions de test enregistrées</h1>
+    <a href="choose.html" style="margin-left:auto;">← Accueil</a>
+    <a href="test-session.html">+ Nouvelle session</a>
+  </header>
+
+  <div class="bar">
+    <span id="count" class="muted"></span>
+    <span style="flex:1"></span>
+    <button id="btn-export" class="ghost">Exporter tout (.json)</button>
+    <label class="ghost" style="padding:9px 15px;border:1px solid rgba(120,140,200,.4);border-radius:8px;cursor:pointer;">
+      Importer… <input id="imp" type="file" accept=".json" style="display:none;">
+    </label>
+    <button id="btn-clear" class="danger">Tout supprimer</button>
+  </div>
+
+  <div class="wrap">
+    <div id="list"></div>
+
+    <div id="detail">
+      <h2 style="margin:18px 0 10px;">Détail de la session</h2>
+      <div class="detail-grid" id="detail-grid"></div>
+      <div class="viz-row">
+        <div class="viz-box" style="flex:1;min-width:320px;">
+          <h3>Chronologie (fixations / saccades / stimuli)</h3>
+          <svg id="timeline" width="100%" height="170"></svg>
+        </div>
+        <div class="viz-box" style="flex:1;min-width:320px;">
+          <h3>Parcours du regard (scanpath + heatmap)</h3>
+          <canvas id="mini-scan" width="480" height="300" style="width:100%;background:#0a0f1e;border-radius:8px;"></canvas>
+        </div>
+      </div>
+      <div class="viz-row">
+        <button id="btn-fullviz">Résultats détaillés (analyse + parcours)</button>
+        <button id="btn-dl-json" class="ghost">Télécharger JSON</button>
+        <button id="btn-dl-csv" class="ghost">Télécharger CSV</button>
+        <button id="btn-del" class="danger">Supprimer cette session</button>
+        <span id="cmp"></span>
+      </div>
+    </div>
+  </div>
+
+  <script src="src/logger/gaze-logger.js"></script>
+  <script src="src/session-store/session-store.js"></script>
+  <script src="src/gaze-viz/gaze-viz.js"></script>
+  <script src="src/results-view/results-view.js"></script>
+
+  <script>
+  (function () {
+    'use strict';
+    var _selId = null;
+
+    function fmt(v, suffix){ return (v==null||v==='') ? '—' : (v + (suffix||'')); }
+
+    function renderList() {
+      var rows = SessionStore.list();
+      document.getElementById('count').textContent = rows.length + ' session(s) enregistrée(s)';
+      var el = document.getElementById('list');
+      if (!rows.length) { el.innerHTML = '<div class="empty">Aucune session. Lancez une <a href="test-session.html" style="color:#4ecdc4">session de test</a>.</div>'; return; }
+      var html = '<table><thead><tr>'
+        + '<th>Date</th><th>Participant</th><th>Lunettes</th><th>Moteur</th>'
+        + '<th>Calib. (px)</th><th>Lux</th><th>Conf.</th><th>Points</th><th>Fix</th><th>Sacc</th><th>AOI</th>'
+        + '</tr></thead><tbody>';
+      rows.forEach(function (r) {
+        var s = r.summary;
+        html += '<tr class="row' + (r.id===_selId?' sel':'') + '" data-id="' + r.id + '">'
+          + '<td>' + fmt(s.date) + '</td>'
+          + '<td>' + fmt(s.participant) + '</td>'
+          + '<td>' + fmt(s.glasses) + '</td>'
+          + '<td>' + fmt(s.engine) + '</td>'
+          + '<td>' + fmt(s.calib_error_px) + '</td>'
+          + '<td>' + fmt(s.lux) + '</td>'
+          + '<td>' + fmt(s.mean_confidence) + '</td>'
+          + '<td>' + fmt(s.n_points) + '</td>'
+          + '<td>' + fmt(s.n_fixations) + '</td>'
+          + '<td>' + fmt(s.n_saccades) + '</td>'
+          + '<td>' + fmt(s.n_aoi_hits) + '</td>'
+          + '</tr>';
+      });
+      html += '</tbody></table>';
+      el.innerHTML = html;
+      el.querySelectorAll('tr.row').forEach(function (tr) {
+        tr.addEventListener('click', function () { selectSession(tr.getAttribute('data-id')); });
+      });
+    }
+
+    function selectSession(id) {
+      _selId = id;
+      renderList();
+      var data = SessionStore.get(id);
+      if (!data) return;
+      var s = SessionStore.summarize(data);
+      var sess = data.session || {};
+      document.getElementById('detail').classList.add('on');
+      document.getElementById('detail-grid').innerHTML =
+        '<div><b>Participant</b> : ' + fmt(s.participant) + '</div>'
+        + '<div><b>Date / heure</b> : ' + fmt((sess.start_time||'').replace('T',' ').slice(0,19)) + '</div>'
+        + '<div><b>Lunettes</b> : ' + fmt(s.glasses) + '</div>'
+        + '<div><b>Moteur</b> : ' + fmt(s.engine) + '</div>'
+        + '<div><b>Erreur calibration</b> : ' + fmt(s.calib_error_px,' px') + '</div>'
+        + '<div><b>Luminosité médiane</b> : ' + fmt(s.lux,' lux') + '</div>'
+        + '<div><b>Confiance moyenne</b> : ' + fmt(s.mean_confidence) + '</div>'
+        + '<div><b>Résolution écran</b> : ' + (sess.screen_resolution ? sess.screen_resolution.width+'×'+sess.screen_resolution.height : '—') + '</div>'
+        + '<div><b>Points / Fixations / Saccades</b> : ' + s.n_points + ' / ' + s.n_fixations + ' / ' + s.n_saccades + '</div>'
+        + '<div><b>Hits AOI</b> : ' + fmt(s.n_aoi_hits) + '</div>';
+      drawTimeline(data);
+      drawMiniScan(data);
+      document.getElementById('cmp').textContent = '';
+    }
+
+    // Chronologie D3 : fixations (vert), saccades (bleu), stimuli (rouge).
+    function drawTimeline(data) {
+      var svg = d3.select('#timeline'); svg.selectAll('*').remove();
+      var W = document.getElementById('timeline').clientWidth || 600, H = 170;
+      var events = (data.events||[]);
+      var inters = (data.interactions||[]).filter(function(i){ return i.type==='stimulus_shown'; });
+      var tMax = d3.max(events, function(e){ return e.end_time; }) || 1;
+      var tMin = d3.min(events, function(e){ return e.start_time; }) || 0;
+      // Convertir en t_rel via raw si possible, sinon utiliser start/end bruts.
+      var x = d3.scaleLinear().domain([tMin, tMax]).range([40, W-20]);
+      // Axe
+      svg.append('g').attr('transform','translate(0,'+(H-24)+')')
+        .call(d3.axisBottom(x).ticks(6).tickFormat(function(d){ return ((d-tMin)/1000).toFixed(0)+'s'; }))
+        .selectAll('text').style('fill','#9aa6c0');
+      // Stimuli (bandes rouges) — approximées sur la timeline via leur ordre.
+      events.forEach(function (e) {
+        var y = e.type==='fixation' ? 40 : 80;
+        var col = e.type==='fixation' ? '#27ae60' : '#6c8cff';
+        svg.append('rect')
+          .attr('x', x(e.start_time)).attr('y', y)
+          .attr('width', Math.max(2, x(e.end_time)-x(e.start_time))).attr('height', 22)
+          .attr('rx',3).attr('fill', col).attr('opacity',0.8);
+      });
+      svg.append('text').attr('x',6).attr('y',54).style('fill','#27ae60').style('font-size','11px').text('Fix');
+      svg.append('text').attr('x',6).attr('y',94).style('fill','#6c8cff').style('font-size','11px').text('Sacc');
+    }
+
+    // Mini scanpath + heatmap, mis à l'échelle de la résolution de la session.
+    function drawMiniScan(data) {
+      var cv = document.getElementById('mini-scan'); var ctx = cv.getContext('2d');
+      ctx.clearRect(0,0,cv.width,cv.height);
+      var sess = data.session||{}; var res = sess.screen_resolution||{width:1920,height:1080};
+      var sx = cv.width/res.width, sy = cv.height/res.height;
+      var raw = data.raw_gaze_data||[];
+      // points
+      ctx.fillStyle='rgba(78,205,196,0.25)';
+      raw.forEach(function(p){ ctx.beginPath(); ctx.arc(p.x*sx, p.y*sy, 2, 0, Math.PI*2); ctx.fill(); });
+      // scanpath sur fixations
+      var fx = (data.events||[]).filter(function(e){return e.type==='fixation';})
+        .map(function(f){ return { x:(f.details&&f.details.x)*sx, y:(f.details&&f.details.y)*sy, d:f.duration }; })
+        .filter(function(f){ return isFinite(f.x)&&isFinite(f.y); });
+      ctx.strokeStyle='rgba(108,140,255,0.8)'; ctx.lineWidth=1.5; ctx.beginPath();
+      fx.forEach(function(f,i){ i?ctx.lineTo(f.x,f.y):ctx.moveTo(f.x,f.y); }); ctx.stroke();
+      fx.forEach(function(f,i){
+        var r=Math.max(4,Math.min(16,6+(f.d||0)/60));
+        ctx.beginPath(); ctx.arc(f.x,f.y,r,0,Math.PI*2);
+        ctx.fillStyle='rgba(78,205,196,0.3)'; ctx.fill();
+        ctx.strokeStyle='#4ecdc4'; ctx.lineWidth=1.5; ctx.stroke();
+        ctx.fillStyle='#fff'; ctx.font='10px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
+        ctx.fillText(String(i+1), f.x, f.y);
+      });
+    }
+
+    // ── Actions ──
+    document.getElementById('btn-export').addEventListener('click', function () {
+      var blob = new Blob([JSON.stringify(SessionStore.exportAll(), null, 2)], { type:'application/json' });
+      var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+      a.download='webgaze_sessions_'+new Date().toISOString().slice(0,10)+'.json'; a.click();
+    });
+    document.getElementById('imp').addEventListener('change', function (e) {
+      var f=e.target.files[0]; if(!f) return;
+      var rd=new FileReader();
+      rd.onload=function(){ try{ var obj=JSON.parse(rd.result); var n=SessionStore.importAll(obj,true);
+        alert(n+' session(s) importée(s).'); renderList(); }catch(err){ alert('Fichier invalide.'); } };
+      rd.readAsText(f);
+    });
+    document.getElementById('btn-clear').addEventListener('click', function () {
+      if (confirm('Supprimer TOUTES les sessions enregistrées ?')) { SessionStore.clear(); _selId=null;
+        document.getElementById('detail').classList.remove('on'); renderList(); }
+    });
+    document.getElementById('btn-fullviz').addEventListener('click', function () {
+      var d=SessionStore.get(_selId); if(d) ResultsView.show(d);
+    });
+    document.getElementById('btn-dl-json').addEventListener('click', function () {
+      var d=SessionStore.get(_selId); if(!d) return;
+      var blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});
+      var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+      a.download='session_'+(d.session.participant_id||'x')+'.json'; a.click();
+    });
+    document.getElementById('btn-dl-csv').addEventListener('click', function () {
+      var d=SessionStore.get(_selId); if(!d) return;
+      // Réutilise l'export CSV du logger en réimportant les données.
+      var tmp = d; var rows = (tmp.raw_gaze_data||[]);
+      var cols=['t_rel_ms','timestamp','x','y','confidence','lux','source_module','test_case_id','target_aoi_id'];
+      var out=[cols.join(',')];
+      rows.forEach(function(p){ out.push(cols.map(function(k){ return p[k]==null?'':p[k]; }).join(',')); });
+      var blob=new Blob([out.join('\n')],{type:'text/csv'});
+      var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
+      a.download='session_'+(d.session.participant_id||'x')+'.csv'; a.click();
+    });
+    document.getElementById('btn-del').addEventListener('click', function () {
+      if (_selId && confirm('Supprimer cette session ?')) { SessionStore.delete(_selId); _selId=null;
+        document.getElementById('detail').classList.remove('on'); renderList(); }
+    });
+
+    renderList();
+  })();
+  </script>
+</body>
+</html>

@@ -82,6 +82,8 @@
   var _vizStates     = []; // historique des états de visualisation (zoom, vue, filtres…)
   var _clockOrigin   = 0;  // performance.now() au démarrage de la session
   var _defaultModuleName = null; // module de capture courant ('webgazer'|'mediapipe')
+  var _currentLux    = null; // dernière luminosité ambiante mesurée (lux)
+  var _testContext   = { test_case_id: null, target_aoi_id: null }; // contexte du test guidé
 
   // Module émetteur par défaut (gaze engine actif), utilisé si non précisé.
   function _defaultModule() { return _defaultModuleName || 'unknown'; }
@@ -93,18 +95,27 @@
      * Initialise une nouvelle session de log.
      * @param {string} participantId
      * @param {object} [calibrationScore] — { mean_error_px, std_error_px }
+     * @param {object} [info] — { first_name, last_name, glasses, engine, lighting, age, ... }
      */
-    init: function (participantId, calibrationScore) {
+    init: function (participantId, calibrationScore, info) {
       _rawGaze       = [];
       _events        = [];
       _aoiHits       = [];
       _interactions  = [];
       _vizStates     = [];
+      _testContext   = { test_case_id: null, target_aoi_id: null };
       _clockOrigin   = _now();
+      info = info || {};
       _session  = {
         id:             _uuid(),
         format_version: GazeLogger.FORMAT_VERSION,
         participant_id: participantId || 'anonymous',
+        first_name:     info.first_name || null,
+        last_name:      info.last_name || null,
+        glasses:        info.glasses != null ? info.glasses : null,
+        age:            info.age || null,
+        lighting:       info.lighting || null,
+        engine:         info.engine || _defaultModuleName || null,
         start_time:     new Date().toISOString(),
         end_time:       null,
         // Origine de l'horloge monotone : tous les timestamps relatifs (t_rel_ms)
@@ -153,8 +164,25 @@
       if (meta.raw_y != null) entry.raw_y = Math.round(meta.raw_y);
       if (meta.dom) entry.dom = meta.dom;
       if (meta.viz_state) entry.viz_state = meta.viz_state;
+      // Luminosité ambiante mesurée (lux) au moment du point.
+      var lux = (meta.lux != null) ? meta.lux : _currentLux;
+      if (lux != null) entry.lux = Math.round(lux);
+      // Contexte du test guidé : quel stimulus / quelle AOI ciblée.
+      if (_testContext.test_case_id != null) entry.test_case_id = _testContext.test_case_id;
+      if (_testContext.target_aoi_id != null) entry.target_aoi_id = _testContext.target_aoi_id;
       _rawGaze.push(entry);
     },
+
+    /** Définit la luminosité ambiante courante (lux), injectée dans chaque point. */
+    setLux: function (lux) { _currentLux = (typeof lux === 'number' && isFinite(lux)) ? lux : null; },
+    getLux: function () { return _currentLux; },
+
+    /** Définit le contexte du test guidé (stimulus courant). */
+    setTestContext: function (testCaseId, targetAoiId) {
+      _testContext = { test_case_id: testCaseId != null ? testCaseId : null,
+                       target_aoi_id: targetAoiId != null ? targetAoiId : null };
+    },
+    clearTestContext: function () { _testContext = { test_case_id: null, target_aoi_id: null }; },
 
     /**
      * Enregistre une interaction utilisateur (donnée multimodale : clic, survol,
@@ -382,8 +410,9 @@
      */
     exportCsv: function () {
       var data = this.export();
-      var cols = ['t_rel_ms', 'timestamp', 'x', 'y', 'raw_x', 'raw_y', 'confidence',
-                  'source_module', 'dom_semantic_type', 'dom_text', 'dom_id',
+      var cols = ['t_rel_ms', 'timestamp', 'x', 'y', 'raw_x', 'raw_y', 'confidence', 'lux',
+                  'source_module', 'test_case_id', 'target_aoi_id',
+                  'dom_semantic_type', 'dom_text', 'dom_id',
                   'viz_active_view', 'viz_dataset', 'viz_current_aoi'];
       function esc(v) {
         if (v == null) return '';
@@ -394,8 +423,9 @@
       (data.raw_gaze_data || []).forEach(function (p) {
         var dom = p.dom || {}, vs = p.viz_state || {};
         lines.push([
-          p.t_rel_ms, p.timestamp, p.x, p.y, p.raw_x, p.raw_y, p.confidence,
-          p.source_module, dom.semantic_type, dom.text, dom.id,
+          p.t_rel_ms, p.timestamp, p.x, p.y, p.raw_x, p.raw_y, p.confidence, p.lux,
+          p.source_module, p.test_case_id, p.target_aoi_id,
+          dom.semantic_type, dom.text, dom.id,
           vs.active_view, vs.dataset, vs.current_aoi,
         ].map(esc).join(','));
       });
@@ -443,6 +473,7 @@
       _aoiHits       = [];
       _interactions  = [];
       _vizStates     = [];
+      _testContext   = { test_case_id: null, target_aoi_id: null };
     },
 
     /**
@@ -551,7 +582,7 @@
   }
 
   // Version du format d'export — à incrémenter à tout changement de schéma.
-  GazeLogger.FORMAT_VERSION = '1.2.0';
+  GazeLogger.FORMAT_VERSION = '1.3.0';
 
   global.GazeLogger = GazeLogger;
 

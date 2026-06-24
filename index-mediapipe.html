@@ -15,7 +15,9 @@
   <style>
     :root { --bg:#0f0f1a; --panel:#16213e; --accent:#6c8cff; --accent2:#4ecdc4; --text:#eee; --muted:#9aa6c0; }
     * { box-sizing: border-box; }
-    body { margin:0; background:var(--bg); color:var(--text); font-family:'Segoe UI',Arial,sans-serif; }
+    body { margin:0; background:var(--bg); color:var(--text); font-family:'Segoe UI',Arial,sans-serif;
+      -webkit-user-select:none; -moz-user-select:none; user-select:none; }
+    input, textarea, select { -webkit-user-select:text; user-select:text; }
     header { padding:14px 22px; display:flex; align-items:center; gap:16px; border-bottom:1px solid rgba(120,140,200,0.18); }
     header h1 { font-size:1.1rem; margin:0; }
     header .engine { font-size:0.75rem; background:rgba(108,140,255,0.15); color:var(--accent); padding:3px 10px; border-radius:999px; font-weight:700; }
@@ -43,9 +45,21 @@
       border:2px solid var(--accent); z-index:10000;
       transition:left .35s ease, right .35s ease, top .35s ease, bottom .35s ease; }
     #mp-mirror video { width:160px; height:120px; display:block; transform:scaleX(-1); object-fit:cover; }
+    /* Ovale guide d'alignement du visage (comme WebGazer) */
+    #mp-mirror-oval { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+      width:74px; height:96px; border-radius:50%; border:3px dashed #e74c3c; pointer-events:none;
+      transition:border-color .3s, box-shadow .3s; }
+    #mp-mirror-hint { position:absolute; bottom:3px; left:0; right:0; text-align:center;
+      font-size:.62rem; color:#e74c3c; pointer-events:none; text-shadow:0 1px 2px #000; }
     #gaze-cursor { position:fixed; width:24px; height:24px; border-radius:50%; border:2px solid var(--accent2);
       background:rgba(78,205,196,0.15); transform:translate(-50%,-50%); pointer-events:none; z-index:9000; display:none; }
     .note { padding:0 22px 18px; color:var(--muted); font-size:0.82rem; max-width:760px; line-height:1.6; }
+    /* Retour visage permanent (toujours visible) */
+    #face-widget { position:fixed; bottom:14px; right:14px; z-index:9600; width:200px;
+      background:rgba(15,15,26,.92); border:1px solid rgba(108,140,255,.4); border-radius:12px;
+      padding:10px 12px; font-size:.78rem; color:#ddd; }
+    #face-widget .fw-row { display:flex; justify-content:space-between; margin:3px 0; }
+    #face-widget .fw-dot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:5px; }
   </style>
 </head>
 <body>
@@ -86,12 +100,28 @@
   <div id="mp-overlay">
     <div class="mp-title"><h2 id="mp-h">Calibration MediaPipe</h2><p id="mp-sub"></p></div>
   </div>
-  <div id="mp-mirror" style="display:none;"><video id="mp-video" autoplay playsinline muted></video></div>
+  <div id="mp-mirror" style="display:none;">
+    <video id="mp-video" autoplay playsinline muted></video>
+    <div id="mp-mirror-oval"></div>
+    <div id="mp-mirror-hint">Alignez votre visage</div>
+  </div>
+
+  <!-- Retour visage permanent -->
+  <div id="face-widget">
+    <div style="font-weight:bold;color:var(--accent2);margin-bottom:5px;">Retour visage</div>
+    <div class="fw-row"><span><span class="fw-dot" id="fw-face-dot" style="background:#888"></span>Visage</span><span id="fw-face">—</span></div>
+    <div class="fw-row"><span><span class="fw-dot" id="fw-dist-dot" style="background:#888"></span>Distance</span><span id="fw-dist">—</span></div>
+    <div class="fw-row"><span><span class="fw-dot" id="fw-lux-dot" style="background:#888"></span>Luminosité</span><span id="fw-lux">—</span></div>
+  </div>
 
   <!-- Modules partagés (logique d'analyse indépendante du moteur) -->
   <script src="src/calibration/calibration.js?v=mp"></script>
   <script src="src/logger/gaze-logger.js"></script>
+  <script src="src/session-store/session-store.js"></script>
   <script src="src/gaze-viz/gaze-viz.js"></script>
+  <script src="src/results-view/results-view.js"></script>
+  <script src="src/test-scenario/test-scenario.js"></script>
+  <script src="src/ambient-light/ambient-light.js"></script>
   <script src="src/barchart/barchart.js"></script>
   <script src="src/linechart/linechart.js"></script>
   <script src="src/scatterchart/scatterchart.js"></script>
@@ -124,6 +154,48 @@
     var CLICKS = 5;
 
     function setStatus(txt, color) { statusEl.textContent = txt; if (color) statusEl.style.color = color; }
+
+    // ── Retour visage permanent (visage / distance / luminosité) ────────────────
+    // Alimenté par le moteur MediaPipe (détection + échelle inter-oculaire) et par
+    // AmbientLight. Mis à jour en continu, quel que soit l'état (aperçu, suivi…).
+    function _fwColor(ok) { return ok ? '#27ae60' : '#e0a96a'; }
+    setInterval(function () {
+      var faceOk = false, distLabel = '—', distOk = false;
+      try {
+        faceOk = !!(Engine && Engine.isFaceDetected && Engine.isFaceDetected());
+        var scale = (Engine && Engine.getFaceScale) ? Engine.getFaceScale() : null;
+        if (faceOk && scale != null) {
+          distOk = scale >= 0.20 && scale <= 0.42;
+          distLabel = distOk ? '✓ ~60 cm' : (scale < 0.20 ? '↔ rapprochez' : '↔ éloignez');
+        }
+      } catch (_) {}
+      document.getElementById('fw-face').textContent = faceOk ? 'détecté' : 'non détecté';
+      document.getElementById('fw-face-dot').style.background = _fwColor(faceOk);
+      document.getElementById('fw-dist').textContent = distLabel;
+      document.getElementById('fw-dist-dot').style.background = _fwColor(distOk);
+      var lux = (window.AmbientLight && AmbientLight.getLux());
+      var luxOk = lux != null && lux >= 80 && lux <= 700;
+      document.getElementById('fw-lux').textContent = lux != null ? (lux + ' lux') : '—';
+      document.getElementById('fw-lux-dot').style.background = _fwColor(luxOk);
+
+      // Ovale guide sur le mini-miroir : vert si bien aligné/à distance, rouge sinon.
+      var oval = document.getElementById('mp-mirror-oval');
+      var hint = document.getElementById('mp-mirror-hint');
+      if (oval && hint) {
+        var good = faceOk && distOk;
+        oval.style.borderColor = good ? '#27ae60' : '#e74c3c';
+        oval.style.boxShadow = good ? '0 0 10px 3px rgba(39,174,96,.45)' : 'none';
+        hint.style.color = good ? '#27ae60' : '#e74c3c';
+        hint.textContent = !faceOk ? 'Aucun visage'
+          : distOk ? '✓ Bien placé'
+          : (distLabel.indexOf('rapprochez') !== -1 ? 'Rapprochez-vous' : 'Éloignez-vous');
+      }
+    }, 500);
+    // Démarre la mesure de luminosité dès que le flux caméra est disponible.
+    var _luxWait = setInterval(function () {
+      var v = document.getElementById('mp-video');
+      if (v && v.srcObject && window.AmbientLight) { AmbientLight.start(v); clearInterval(_luxWait); }
+    }, 600);
 
     window.addEventListener('mediapipe-ready', function () { _mpReady = true; });
 
@@ -191,28 +263,26 @@
       var inp = 'width:100%;background:#0d1b2a;border:1px solid #2c3e50;border-radius:8px;color:#eee;padding:9px 12px;margin-bottom:14px;box-sizing:border-box;';
       box.innerHTML =
         '<h3 style="margin:0 0 18px;color:#6c8cff;">Session — données participant</h3>'
-        + '<label style="font-size:.82rem;color:#9aa6c0;">ID participant *</label>'
-        + '<input id="f-pid" placeholder="P01…" style="' + inp + '" />'
-        + '<label style="font-size:.82rem;color:#9aa6c0;">Âge</label>'
-        + '<input id="f-age" type="number" min="16" max="90" style="' + inp + '" />'
+        + '<label style="font-size:.82rem;color:#9aa6c0;">Prénom *</label>'
+        + '<input id="f-first" placeholder="Prénom" style="' + inp + '" />'
+        + '<label style="font-size:.82rem;color:#9aa6c0;">Nom *</label>'
+        + '<input id="f-last" placeholder="Nom" style="' + inp + '" />'
         + '<label style="font-size:.82rem;color:#9aa6c0;">Lunettes / lentilles</label>'
         + '<select id="f-glasses" style="' + inp + '"><option value="non">Non</option>'
         + '<option value="lunettes">Lunettes</option><option value="lentilles">Lentilles</option></select>'
-        + '<label style="font-size:.82rem;color:#9aa6c0;">Éclairage</label>'
-        + '<select id="f-light" style="' + inp + '"><option value="normal">Normal</option>'
-        + '<option value="sombre">Sombre</option><option value="lumineux">Lumineux</option><option value="contre-jour">Contre-jour</option></select>'
-        + '<div id="f-err" style="color:#e74c3c;font-size:.82rem;margin-bottom:10px;display:none;">L\'ID est obligatoire.</div>'
+        + '<div id="f-err" style="color:#e74c3c;font-size:.82rem;margin-bottom:10px;display:none;">Prénom et nom obligatoires.</div>'
         + '<button id="f-go" style="background:#6c8cff;color:#fff;border:none;border-radius:8px;padding:11px 18px;font-weight:700;width:100%;cursor:pointer;">Continuer →</button>';
       overlay.appendChild(box);
       document.getElementById('f-go').addEventListener('click', function () {
-        var pid = document.getElementById('f-pid').value.trim();
-        if (!pid) { document.getElementById('f-err').style.display = 'block'; return; }
+        var first = document.getElementById('f-first').value.trim();
+        var last  = document.getElementById('f-last').value.trim();
+        if (!first || !last) { document.getElementById('f-err').style.display = 'block'; return; }
         var session = {
-          participant_id: pid,
+          first_name: first,
+          last_name: last,
+          participant_id: (first[0] + last).toLowerCase().replace(/[^a-z0-9]/g, ''),
           date: new Date().toISOString().slice(0,10),
-          age: document.getElementById('f-age').value || null,
           glasses: document.getElementById('f-glasses').value,
-          lighting: document.getElementById('f-light').value,
           engine: 'mediapipe',
           screen_resolution: (typeof screen !== 'undefined') ? screen.width + 'x' + screen.height : null,
         };
@@ -525,7 +595,7 @@
         + 'Le <span style="color:#6c8cff;">point bleu</span> suit votre regard. '
         + 'Promenez vos yeux à l\'écran : le point doit vous suivre.<br>'
         + '<button id="mp-freelook-ok" style="margin-top:10px;background:#4ecdc4;color:#0f0f1a;border:none;'
-        + 'border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">C\'est bon, lancer le suivi →</button> '
+        + 'border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">C\'est bon, lancer le test →</button> '
         + '<button id="mp-freelook-recal" style="margin-top:10px;background:transparent;color:#e0a96a;'
         + 'border:1px solid rgba(224,169,106,0.5);border-radius:8px;padding:9px 18px;cursor:pointer;">Recalibrer</button>';
       document.body.appendChild(box);
@@ -533,8 +603,7 @@
       document.getElementById('mp-freelook-ok').addEventListener('click', function () {
         stopCalGazeDot();
         box.remove();
-        // Démarre directement le suivi (équivaut au bouton « Démarrer le suivi »).
-        document.getElementById('btn-start').click();
+        startTestScenario(); // lance le scénario automatique (cercle + 15s libre × 3)
       });
       document.getElementById('mp-freelook-recal').addEventListener('click', function () {
         stopCalGazeDot();
@@ -542,6 +611,75 @@
         Engine.clearCalibration();
         runCalibration();
       });
+    }
+
+    // ── Scénario de test AUTOMATIQUE après calibration ──────────────────────────
+    // Pour chaque graphique : cercle rouge ~3 s sur une AOI, puis 15 s d'exploration
+    // libre, puis page suivante — le tout automatique. Le regard est enregistré avec
+    // le contexte (test_case_id, target_aoi_id) pour l'analyse des résultats.
+    function startTestScenario() {
+      var stored = Engine.getStoredProfile();
+      var pid = (_session && _session.participant_id) || 'participant-mediapipe';
+      var calScore = stored && stored.meta ? { mean_error_px: stored.meta.meanError, std_error_px: stored.meta.stdError || null } : null;
+      window.GazeLogger.init(pid, calScore, {
+        first_name: _session && _session.first_name, last_name: _session && _session.last_name,
+        glasses: _session && _session.glasses, engine: 'mediapipe',
+      });
+      GazeLogger.setModule('mediapipe');
+      GazeLogger.logInteraction('test_session_start', { participant: _session || null });
+      if (window.Calibration.resetSmoothing) Calibration.resetSmoothing();
+      Engine.onGaze(onGaze);          // réutilise le handler qui logue + dwell
+      _gazeOn = true;
+      cursor.style.display = 'block';
+
+      TestScenario.run({
+        amorceMs: 3000, exploreMs: 15000,
+        pages: [
+          { id:'tab-bar',     label:'Bar Chart',    activate:function(){ switchTab('tab-barchart'); }, getAOIs:function(){ return BarChart.getAOIs(); } },
+          { id:'tab-line',    label:'Line Chart',   activate:function(){ switchTab('tab-linechart'); }, getAOIs:function(){ return LineChart.getAOIs(); } },
+          { id:'tab-scatter', label:'Scatter Plot', activate:function(){ switchTab('tab-scatter'); }, getAOIs:function(){ return ScatterChart.getAOIs(); } },
+        ],
+        onPhase: function (phase, info) {
+          if (phase === 'amorce') GazeLogger.setTestContext(info.test_case_id, info.aoi ? info.aoi.id : null);
+          else if (phase === 'free') GazeLogger.setTestContext(info.test_case_id, null);
+          if (phase !== 'page' && window.GazeLogger.isInitialized())
+            GazeLogger.logInteraction('stimulus_shown', { phase: phase, test_case_id: info.test_case_id, aoi: info.aoi ? info.aoi.id : null });
+        },
+        onProgress: function (t) { setStatus(t, '#4ecdc4'); },
+        onDone: function () { finishTestScenario(); },
+      });
+    }
+
+    // Bascule d'onglet réutilisable (déclenche le clic du bouton d'onglet).
+    function switchTab(tabId) {
+      var btn = document.querySelector('#demo-nav button[data-tab="' + tabId + '"]');
+      if (btn) btn.click();
+    }
+
+    function finishTestScenario() {
+      GazeLogger.clearTestContext();
+      Engine.offGaze(onGaze);
+      _gazeOn = false; cursor.style.display = 'none';
+      _resetDwell();
+      [BarChart, LineChart, ScatterChart].forEach(function (c){ if(c.setGazeMode) c.setGazeMode(false); });
+      // Post-traitement : fixations, saccades, hits AOI.
+      var raw = GazeLogger.export().raw_gaze_data;
+      if (raw.length >= 10) {
+        Calibration.detectFixations(raw, 80, 100).forEach(function (f){
+          GazeLogger.logEvent({ type:'fixation', start_time:f.start_time, end_time:f.end_time, duration:f.duration,
+            details:{ x:f.x_center, y:f.y_center, points_count:f.points_count } });
+        });
+        Calibration.detectSaccades(raw, 0.7).forEach(function (s){
+          GazeLogger.logEvent({ type:'saccade', start_time:s.start_time, end_time:s.end_time, duration:s.duration,
+            details:{ amplitude:s.amplitude, peak_velocity:s.peak_velocity } });
+        });
+      }
+      GazeLogger.logInteraction('test_session_end', {});
+      var data = GazeLogger.export();
+      var id = SessionStore.save(data);
+      try { GazeLogger.download(); } catch (_) {}
+      setStatus('Test terminé — session enregistrée.', '#4ecdc4');
+      ResultsView.show(data);
     }
 
     // ── Dwell / AOI (porté de index.html, identique au moteur WebGazer) ──────────
@@ -667,7 +805,12 @@
       var stored = Engine.getStoredProfile();
       var pid = (_session && _session.participant_id) || 'participant-mediapipe';
       var calScore = stored && stored.meta ? { mean_error_px: stored.meta.meanError, std_error_px: stored.meta.stdError || null } : null;
-      window.GazeLogger.init(pid, calScore);
+      window.GazeLogger.init(pid, calScore, {
+        first_name: _session && _session.first_name,
+        last_name:  _session && _session.last_name,
+        glasses:    _session && _session.glasses,
+        engine:     'mediapipe',
+      });
       GazeLogger.setModule('mediapipe');
       GazeLogger.logInteraction('session_start', { engine: 'mediapipe', participant: _session || null, source_module: 'mediapipe' });
       GazeLogger.logVizState(_currentVizState());

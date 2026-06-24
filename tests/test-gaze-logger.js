@@ -175,8 +175,8 @@ const stats2 = Logger.getStats();
 assert(typeof stats2.meanConfidence === 'number', 'getStats.meanConfidence calculée');
 assert(stats2.vizStates === 1, 'getStats.vizStates');
 
-section('Test 14 : format_version 1.2.0');
-assert(Logger.FORMAT_VERSION === '1.2.0', 'FORMAT_VERSION = 1.2.0');
+section('Test 14 : format_version courant');
+assert(Logger.FORMAT_VERSION === '1.3.0', 'FORMAT_VERSION = 1.3.0');
 
 section('Test 15 : export CSV');
 Logger.clear();
@@ -200,6 +200,34 @@ assert(/^rgb\(231,76,60\)$/.test(Logger.confidenceColor(0)), 'confiance 0 → ro
 assert(/^rgb\(39,174,96\)$/.test(Logger.confidenceColor(1)), 'confiance 1 → vert');
 assert(/^rgb\(230,126,34\)$/.test(Logger.confidenceColor(0.5)), 'confiance 0.5 → orange');
 assert(/^rgb\(/.test(Logger.confidenceColor(null)), 'valeur nulle → couleur neutre valide');
+
+section('Test 17 : v1.3 — lux, contexte test, participant');
+assert(Logger.FORMAT_VERSION === '1.3.0', 'FORMAT_VERSION = 1.3.0');
+Logger.clear();
+Logger.init('p1', { mean_error_px: 88 }, { first_name: 'Léa', last_name: 'Dupont', glasses: 'non', engine: 'webgazer' });
+var sess = Logger.export().session;
+assert(sess.first_name === 'Léa' && sess.last_name === 'Dupont', 'prénom/nom dans la session');
+assert(sess.glasses === 'non', 'lunettes dans la session');
+assert(sess.engine === 'webgazer', 'moteur dans la session');
+Logger.setLux(420);
+assert(Logger.getLux() === 420, 'setLux/getLux');
+Logger.setTestContext('tc-2', 'point-3');
+Logger.logRawPoint(50, 60, 100);
+var p = Logger.export().raw_gaze_data[0];
+assert(p.lux === 420, 'lux injecté dans le point');
+assert(p.test_case_id === 'tc-2', 'test_case_id injecté');
+assert(p.target_aoi_id === 'point-3', 'target_aoi_id injecté');
+Logger.clearTestContext();
+Logger.logRawPoint(1, 1, 2);
+var p2 = Logger.export().raw_gaze_data[1];
+assert(p2.test_case_id === undefined, 'contexte test effacé après clearTestContext');
+assert(p2.lux === 420, 'lux toujours présent hors contexte test');
+// lux explicite dans meta prioritaire
+Logger.logRawPoint(2, 2, 3, { lux: 99 });
+assert(Logger.export().raw_gaze_data[2].lux === 99, 'lux du meta prioritaire');
+// CSV contient les nouvelles colonnes
+assert(Logger.exportCsv().split('\n')[0].indexOf('lux') !== -1, 'CSV contient colonne lux');
+assert(Logger.exportCsv().split('\n')[0].indexOf('test_case_id') !== -1, 'CSV contient colonne test_case_id');
 
 // ═══════════════════════════════════════════════════════════════════════════
 console.log('\n══════════════════════════════════════════════════════');

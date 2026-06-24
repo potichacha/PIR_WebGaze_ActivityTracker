@@ -70,7 +70,7 @@
         <li class="con">Précision moyenne, ~10–30 Hz</li>
         <li class="con">Compensation de tête limitée</li>
       </ul>
-      <a class="btn wg" href="index.html">Démarrer avec WebGazer →</a>
+      <a class="btn wg" href="index.html">Lancer un test avec WebGazer →</a>
     </div>
 
     <!-- MediaPipe -->
@@ -85,7 +85,28 @@
         <li class="con">Mapping écran appris à la calibration</li>
         <li class="con">Plus récent, à valider en conditions réelles</li>
       </ul>
-      <a class="btn mp" href="index-mediapipe.html">Démarrer avec MediaPipe →</a>
+      <a class="btn mp" href="index-mediapipe.html">Lancer un test avec MediaPipe →</a>
+    </div>
+  </div>
+
+  <p class="subtitle" style="margin-top:26px;">
+    Quel que soit le moteur choisi ci-dessus, la session enchaîne automatiquement :
+    formulaire participant → calibration → <strong>scénario de test guidé</strong>
+    (cercle rouge puis 15 s d'exploration libre, sur les 3 graphiques) → résultats.
+  </p>
+
+  <!-- Consultation des sessions enregistrées -->
+  <div class="cards" style="margin-top:14px;">
+    <div class="card" style="width:400px;">
+      <span class="badge" style="background:rgba(78,205,196,.15);color:#4ecdc4;">Consultation</span>
+      <h2>Sessions enregistrées</h2>
+      <p class="tagline">Revoir et comparer les tests passés.</p>
+      <ul>
+        <li>Liste : date, nom, lux, px calibration, lunettes…</li>
+        <li>Analyse par stimulus + heatmap + scanpath</li>
+        <li>Export / import (JSON, CSV)</li>
+      </ul>
+      <a class="btn" style="background:var(--accent);" href="session-viewer.html">Consulter les sessions →</a>
     </div>
   </div>
 

@@ -4,13 +4,17 @@ Ce document décrit le format structuré d'export d'une session de suivi du rega
 Le schéma formel (validable) se trouve dans
 [`schema/session.schema.json`](../schema/session.schema.json) (JSON Schema draft-07).
 
-- **Version du format** : `1.2.0` (`session.format_version`).
-- **Producteur** : `GazeLogger.export()` (JSON) et `GazeLogger.exportJsonLd()` (JSON-LD).
+- **Version du format** : `1.3.0` (`session.format_version`).
+- **Producteur** : `GazeLogger.export()` (JSON), `exportJsonLd()` (JSON-LD), `exportCsv()` (CSV).
 
-> **Nouveautés v1.2.0** (demandes encadrante PIR) : confiance de prédiction et
-> `source_module` sur chaque point de regard, descripteur DOM détaillé de l'objet
-> observé, état de la visualisation (`viz_state` + section `viz_states`), et
-> `source_module` sur toutes les entrées pour identifier le module émetteur.
+> **Nouveautés v1.3.0** : luminosité ambiante `lux` par point, contexte du test
+> guidé (`test_case_id`, `target_aoi_id`), et champs participant
+> (`first_name`, `last_name`, `glasses`, `engine`) dans la session. Les sessions de
+> test sont persistées localement (`SessionStore`) et reconsultables via
+> `session-viewer.html`.
+>
+> **v1.2.0** : confiance de prédiction, `source_module`, descripteur DOM détaillé,
+> état de la visualisation (`viz_state` + `viz_states`).
 
 ---
 
