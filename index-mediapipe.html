@@ -151,7 +151,7 @@
     // Grille de calibration : on réutilise celle du module Calibration (cohérence).
     var GRID = window.Calibration.CALIBRATION_GRID;
     var VALID = window.Calibration.VALIDATION_GRID;
-    var CLICKS = 5;
+    var CLICKS = 10; // plus de clics/point → modèle de régression plus stable
 
     function setStatus(txt, color) { statusEl.textContent = txt; if (color) statusEl.style.color = color; }
 
@@ -243,8 +243,7 @@
         Engine.clearCalibration();
         mirror.style.display = 'block';
         showPositioning(function () {
-          setStatus('Calibration en cours…', '#4ecdc4');
-          runCalibration();
+          chooseCalibrationMode();
         });
       } catch (err) {
         setStatus('Erreur : ' + (err.message || err), '#e74c3c');
@@ -404,6 +403,100 @@
       mirror.style.right  = isLeft ? 'auto' : MARGIN+'px';
       mirror.style.top    = isTop  ? MARGIN+'px' : 'auto';
       mirror.style.bottom = isTop  ? 'auto' : MARGIN+'px';
+    }
+
+    // ── Choix du mode de calibration : clics (25 pts) ou poursuite (cible mobile) ─
+    function chooseCalibrationMode() {
+      overlay.classList.add('on');
+      document.getElementById('mp-h').textContent = 'Mode de calibration';
+      document.getElementById('mp-sub').textContent = 'Choisissez comment calibrer';
+      var box = document.createElement('div');
+      box.className = 'mp-form';
+      box.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);'
+        + 'background:#16213e;border-radius:14px;padding:28px 34px;width:90%;max-width:520px;color:#eee;text-align:center;';
+      box.innerHTML =
+        '<h3 style="margin:0 0 10px;color:#6c8cff;">Comment voulez-vous calibrer ?</h3>'
+        + '<p style="color:#9aa6c0;font-size:.86rem;line-height:1.6;margin:0 0 20px;">'
+        + 'La <b>poursuite</b> collecte beaucoup plus de données (souvent plus précis) : '
+        + 'suivez simplement la bille du regard, sans cliquer.</p>'
+        + '<div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">'
+        + '<button id="cm-pursuit" style="background:#6c8cff;color:#fff;border:none;border-radius:9px;padding:13px 20px;font-weight:700;cursor:pointer;flex:1;min-width:200px;">Poursuite (cible mobile) ✦</button>'
+        + '<button id="cm-clicks" style="background:transparent;color:#4ecdc4;border:1px solid rgba(78,205,196,.5);border-radius:9px;padding:13px 20px;font-weight:700;cursor:pointer;flex:1;min-width:200px;">Clics (25 points)</button>'
+        + '</div>';
+      overlay.appendChild(box);
+      document.getElementById('cm-pursuit').addEventListener('click', function () {
+        box.remove(); setStatus('Calibration par poursuite…', '#4ecdc4'); runPursuitCalibration();
+      });
+      document.getElementById('cm-clicks').addEventListener('click', function () {
+        box.remove(); setStatus('Calibration en cours…', '#4ecdc4'); runCalibration();
+      });
+    }
+
+    // ── Calibration par POURSUITE (smooth pursuit) ──────────────────────────────
+    // Une bille parcourt un chemin couvrant tout l'écran ; on enregistre en continu
+    // les features ↔ position de la bille. Beaucoup plus d'échantillons que les
+    // clics, et le regard suit naturellement → modèle souvent plus précis.
+    function runPursuitCalibration() {
+      overlay.classList.add('on');
+      document.getElementById('mp-h').textContent = 'Calibration par poursuite';
+      document.getElementById('mp-sub').textContent = 'Suivez la bille du regard, sans cliquer';
+      Engine.clearCalibration();
+
+      // Chemin : balayage en serpentin (lignes horizontales) + diagonale, en %.
+      var path = [];
+      var rows = [12, 32, 50, 68, 88];
+      rows.forEach(function (yPct, r) {
+        var xs = (r % 2 === 0) ? [8, 30, 50, 70, 92] : [92, 70, 50, 30, 8];
+        xs.forEach(function (xPct) { path.push({ xPct: xPct, yPct: yPct }); });
+      });
+      // Quelques coins/diagonale pour densifier les bords.
+      path.push({xPct:8,yPct:88},{xPct:50,yPct:50},{xPct:92,yPct:12});
+
+      var ball = document.createElement('div');
+      ball.style.cssText = 'position:absolute;width:34px;height:34px;border-radius:50%;z-index:6;'
+        + 'background:radial-gradient(circle at 35% 35%,#9db4ff,#6c8cff 60%,#3a55c8);'
+        + 'box-shadow:0 0 18px 6px rgba(108,140,255,.55);transform:translate(-50%,-50%);';
+      overlay.appendChild(ball);
+
+      var progress = document.createElement('div');
+      progress.style.cssText = 'position:absolute;top:0;left:0;height:4px;width:0%;background:#6c8cff;transition:width .2s;';
+      overlay.appendChild(progress);
+
+      var SEG_MS = 1100;       // durée d'un déplacement entre 2 points
+      var RATE_MS = 45;        // intervalle d'échantillonnage pendant le déplacement
+      var seg = 0;
+
+      function lerp(a, b, t) { return a + (b - a) * t; }
+      function go() {
+        if (seg >= path.length - 1) { finishPursuit(); return; }
+        var p0 = px(path[seg]), p1 = px(path[seg + 1]);
+        _moveMirrorAwayFrom(p1.x, p1.y);
+        progress.style.width = ((seg / (path.length - 1)) * 100) + '%';
+        var t0 = performance.now();
+        var iv = setInterval(function () {
+          var t = Math.min((performance.now() - t0) / SEG_MS, 1);
+          var cx = lerp(p0.x, p1.x, t), cy = lerp(p0.y, p1.y, t);
+          ball.style.left = cx + 'px'; ball.style.top = cy + 'px';
+          // Enregistre les features courantes ↔ position de la bille.
+          Engine.recordPursuitSample(cx, cy);
+          if (t >= 1) { clearInterval(iv); seg++; go(); }
+        }, RATE_MS);
+      }
+      // Laisser 1s au regard pour se poser sur la bille avant de démarrer.
+      ball.style.left = px(path[0]).x + 'px'; ball.style.top = px(path[0]).y + 'px';
+      setTimeout(go, 1000);
+
+      function finishPursuit() {
+        overlay.querySelectorAll('div').forEach(function (d) { if (d===ball||d===progress) d.remove(); });
+        var trained = Engine.trainFromSamples();
+        if (!trained) {
+          overlay.classList.remove('on');
+          setStatus('Poursuite insuffisante (' + Engine.getSampleCount() + ' échantillons). Réessayez.', '#e74c3c');
+          return;
+        }
+        setStatus('Poursuite OK — ' + Engine.getSampleCount() + ' échantillons collectés.', '#4ecdc4');
+        runValidation();
+      }
     }
 
     function runCalibration() {
@@ -633,14 +726,14 @@
       cursor.style.display = 'block';
 
       TestScenario.run({
-        amorceMs: 3000, exploreMs: 15000,
+        amorceMs: 3000, exploreMs: 15000, targetsPerPage: 3,
         pages: [
           { id:'tab-bar',     label:'Bar Chart',    activate:function(){ switchTab('tab-barchart'); }, getAOIs:function(){ return BarChart.getAOIs(); } },
           { id:'tab-line',    label:'Line Chart',   activate:function(){ switchTab('tab-linechart'); }, getAOIs:function(){ return LineChart.getAOIs(); } },
           { id:'tab-scatter', label:'Scatter Plot', activate:function(){ switchTab('tab-scatter'); }, getAOIs:function(){ return ScatterChart.getAOIs(); } },
         ],
         onPhase: function (phase, info) {
-          if (phase === 'amorce') GazeLogger.setTestContext(info.test_case_id, info.aoi ? info.aoi.id : null);
+          if (phase === 'amorce') GazeLogger.setTestContext(info.test_case_id, info.aoi ? info.aoi.id : null, info.target_x, info.target_y);
           else if (phase === 'free') GazeLogger.setTestContext(info.test_case_id, null);
           if (phase !== 'page' && window.GazeLogger.isInitialized())
             GazeLogger.logInteraction('stimulus_shown', { phase: phase, test_case_id: info.test_case_id, aoi: info.aoi ? info.aoi.id : null });

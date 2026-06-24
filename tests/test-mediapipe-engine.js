@@ -225,6 +225,13 @@ assert(Engine.getCorrectionNodeCount() === 1, 'un nœud de correction ajouté');
 Engine.clearCorrectionField();
 assert(Engine.getCorrectionNodeCount() === 0, 'clearCorrectionField vide le champ');
 
+section('Test 13b : recordPursuitSample (calibration par poursuite)');
+assert(typeof Engine.recordPursuitSample === 'function', 'recordPursuitSample exposé');
+Engine.clearCalibration();
+// Sans features courantes (pas de webcam), l'échantillon de poursuite est rejeté.
+assert(Engine.recordPursuitSample(100, 200) === false, 'sans features live → rejet (pas de crash)');
+assert(Engine.getSampleCount() === 0, 'aucun échantillon ajouté hors webcam');
+
 // ─────────────────────────────────────────────────────────────────────────────
 section('Test 14 : warp 3D vers repère frontal [#1bis]');
 // Identité → landmarks inchangés.

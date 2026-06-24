@@ -72,6 +72,7 @@
     var pages = opts.pages || [];
     var AMORCE = opts.amorceMs != null ? opts.amorceMs : 3000;
     var EXPLORE = opts.exploreMs != null ? opts.exploreMs : 15000;
+    var N_TARGETS = opts.targetsPerPage != null ? opts.targetsPerPage : 3;
     if (!pages.length) { if (opts.onDone) opts.onDone(); return; }
 
     _running = true;
@@ -85,31 +86,39 @@
       if (page.activate) page.activate();
       if (opts.onPhase) opts.onPhase('page', { index: pageIdx, page: page });
 
-      // Laisser la visualisation se rendre, puis choisir l'AOI d'amorçage.
+      // Laisser la visualisation se rendre, puis choisir N AOI bien réparties.
       _timers.push(setTimeout(function () {
         if (!_running) return;
         var aois = (page.getAOIs ? page.getAOIs() : []) || [];
-        var aoi = aois.length ? aois[Math.floor(aois.length / 2)] : null; // une AOI centrale
-        startAmorce(page, aoi);
+        // Filtrer les AOI « réelles » (barres/points/colonnes), pas les axes.
+        var real = aois.filter(function (a) {
+          return /^(bar-|point-|col-)/.test(a.id);
+        });
+        if (!real.length) real = aois;
+        // Sélection répartie de N cibles.
+        var targets = [];
+        if (real.length) {
+          var step = Math.max(1, Math.floor(real.length / N_TARGETS));
+          for (var i = 0; i < real.length && targets.length < N_TARGETS; i += step) targets.push(real[i]);
+        }
+        runTargets(page, targets, 0);
       }, 600));
     }
 
-    function startAmorce(page, aoi) {
-      var caseId = page.id + '-amorce';
-      if (aoi) {
-        var cx = aoi.x + aoi.width / 2, cy = aoi.y + aoi.height / 2;
-        _target.style.left = cx + 'px'; _target.style.top = cy + 'px';
-        _target.style.display = 'block';
-        _banr('Regardez le cercle rouge — ' + (aoi.label || aoi.id));
-        if (opts.onPhase) opts.onPhase('amorce', { page: page, aoi: aoi, test_case_id: caseId });
-      } else {
-        _banr('Observez ce graphique…');
-        if (opts.onPhase) opts.onPhase('amorce', { page: page, aoi: null, test_case_id: caseId });
-      }
+    // Affiche successivement chaque cercle rouge (~AMORCE ms), chacun étiqueté.
+    function runTargets(page, targets, i) {
+      if (!_running) return;
+      if (i >= targets.length) { _target.style.display = 'none'; startFree(page); return; }
+      var aoi = targets[i];
+      var caseId = page.id + '-cible' + (i + 1);
+      var cx = aoi.x + aoi.width / 2, cy = aoi.y + aoi.height / 2;
+      _target.style.left = cx + 'px'; _target.style.top = cy + 'px';
+      _target.style.display = 'block';
+      _banr('Cible ' + (i + 1) + '/' + targets.length + ' — regardez le cercle rouge');
+      if (opts.onPhase) opts.onPhase('amorce', { page: page, aoi: aoi, test_case_id: caseId, index: i, target_x: cx, target_y: cy });
       _timers.push(setTimeout(function () {
         if (!_running) return;
-        _target.style.display = 'none';
-        startFree(page);
+        runTargets(page, targets, i + 1);
       }, AMORCE));
     }
 

@@ -999,14 +999,14 @@ function _startWebgazerScenario() {
   if (_activeChart) _activeChart.setGazeMode(true);
 
   TestScenario.run({
-    amorceMs: 3000, exploreMs: 15000,
+    amorceMs: 3000, exploreMs: 15000, targetsPerPage: 3,
     pages: [
       { id:'tab-bar',     label:'Bar Chart',    activate:function(){ _wgSwitchTab('tab-barchart'); },  getAOIs:function(){ return BarChart.getAOIs(); } },
       { id:'tab-line',    label:'Line Chart',   activate:function(){ _wgSwitchTab('tab-linechart'); }, getAOIs:function(){ return LineChart.getAOIs(); } },
       { id:'tab-scatter', label:'Scatter Plot', activate:function(){ _wgSwitchTab('tab-scatter'); },   getAOIs:function(){ return ScatterChart.getAOIs(); } },
     ],
     onPhase: function (phase, info) {
-      if (phase === 'amorce') GazeLogger.setTestContext(info.test_case_id, info.aoi ? info.aoi.id : null);
+      if (phase === 'amorce') GazeLogger.setTestContext(info.test_case_id, info.aoi ? info.aoi.id : null, info.target_x, info.target_y);
       else if (phase === 'free') GazeLogger.setTestContext(info.test_case_id, null);
       if (phase !== 'page' && GazeLogger.isInitialized())
         GazeLogger.logInteraction('stimulus_shown', { phase: phase, test_case_id: info.test_case_id, aoi: info.aoi ? info.aoi.id : null });

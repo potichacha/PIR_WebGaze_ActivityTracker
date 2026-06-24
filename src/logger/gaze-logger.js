@@ -83,7 +83,7 @@
   var _clockOrigin   = 0;  // performance.now() au démarrage de la session
   var _defaultModuleName = null; // module de capture courant ('webgazer'|'mediapipe')
   var _currentLux    = null; // dernière luminosité ambiante mesurée (lux)
-  var _testContext   = { test_case_id: null, target_aoi_id: null }; // contexte du test guidé
+  var _testContext   = { test_case_id: null, target_aoi_id: null, target_x: null, target_y: null }; // contexte du test guidé
 
   // Module émetteur par défaut (gaze engine actif), utilisé si non précisé.
   function _defaultModule() { return _defaultModuleName || 'unknown'; }
@@ -103,7 +103,7 @@
       _aoiHits       = [];
       _interactions  = [];
       _vizStates     = [];
-      _testContext   = { test_case_id: null, target_aoi_id: null };
+      _testContext   = { test_case_id: null, target_aoi_id: null, target_x: null, target_y: null };
       _clockOrigin   = _now();
       info = info || {};
       _session  = {
@@ -167,9 +167,11 @@
       // Luminosité ambiante mesurée (lux) au moment du point.
       var lux = (meta.lux != null) ? meta.lux : _currentLux;
       if (lux != null) entry.lux = Math.round(lux);
-      // Contexte du test guidé : quel stimulus / quelle AOI ciblée.
+      // Contexte du test guidé : quel stimulus / quelle AOI ciblée / sa position.
       if (_testContext.test_case_id != null) entry.test_case_id = _testContext.test_case_id;
       if (_testContext.target_aoi_id != null) entry.target_aoi_id = _testContext.target_aoi_id;
+      if (_testContext.target_x != null) entry.target_x = Math.round(_testContext.target_x);
+      if (_testContext.target_y != null) entry.target_y = Math.round(_testContext.target_y);
       _rawGaze.push(entry);
     },
 
@@ -177,12 +179,16 @@
     setLux: function (lux) { _currentLux = (typeof lux === 'number' && isFinite(lux)) ? lux : null; },
     getLux: function () { return _currentLux; },
 
-    /** Définit le contexte du test guidé (stimulus courant). */
-    setTestContext: function (testCaseId, targetAoiId) {
-      _testContext = { test_case_id: testCaseId != null ? testCaseId : null,
-                       target_aoi_id: targetAoiId != null ? targetAoiId : null };
+    /** Définit le contexte du test guidé (stimulus + position écran de la cible). */
+    setTestContext: function (testCaseId, targetAoiId, targetX, targetY) {
+      _testContext = {
+        test_case_id:  testCaseId != null ? testCaseId : null,
+        target_aoi_id: targetAoiId != null ? targetAoiId : null,
+        target_x:      (typeof targetX === 'number') ? targetX : null,
+        target_y:      (typeof targetY === 'number') ? targetY : null,
+      };
     },
-    clearTestContext: function () { _testContext = { test_case_id: null, target_aoi_id: null }; },
+    clearTestContext: function () { _testContext = { test_case_id: null, target_aoi_id: null, target_x: null, target_y: null }; },
 
     /**
      * Enregistre une interaction utilisateur (donnée multimodale : clic, survol,
@@ -473,7 +479,7 @@
       _aoiHits       = [];
       _interactions  = [];
       _vizStates     = [];
-      _testContext   = { test_case_id: null, target_aoi_id: null };
+      _testContext   = { test_case_id: null, target_aoi_id: null, target_x: null, target_y: null };
     },
 
     /**

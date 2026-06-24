@@ -20,12 +20,22 @@
   // ── Analyse par stimulus à partir de test_case_id / target_aoi_id ──────────────
   // Pour chaque stimulus (cercle rouge montré), on regarde les points de regard
   // étiquetés avec ce test_case_id : combien sont tombés dans la bonne AOI ?
+  // Score de proximité continu d'un point au centre de la cible : 100% si dans le
+  // rayon « plein » (HIT_RADIUS), décroît linéairement jusqu'à 0% au RADIUS_MAX.
+  var HIT_RADIUS = 90;    // px : pleinement « sur la cible »
+  var RADIUS_MAX = 450;   // px : au-delà, score nul
+  function _proximityScore(dist) {
+    if (dist <= HIT_RADIUS) return 1;
+    if (dist >= RADIUS_MAX) return 0;
+    return 1 - (dist - HIT_RADIUS) / (RADIUS_MAX - HIT_RADIUS);
+  }
+
   function analyze(data) {
     var raw = (data.raw_gaze_data || []).filter(function (p) { return p.test_case_id; });
     var byCase = {};
     raw.forEach(function (p) {
       var k = p.test_case_id;
-      if (!byCase[k]) byCase[k] = { target: p.target_aoi_id, n: 0, onTarget: 0, domCounts: {}, tFirst: null, tLast: null, view: null };
+      if (!byCase[k]) byCase[k] = { target: p.target_aoi_id, n: 0, proxSum: 0, proxN: 0, domCounts: {}, tFirst: null, tLast: null, view: null };
       var c = byCase[k];
       c.n++;
       if (!c.view && p.viz_state && p.viz_state.active_view) c.view = p.viz_state.active_view;
@@ -38,8 +48,11 @@
       }
       if (p.viz_state && p.viz_state.current_aoi) lookedId = p.viz_state.current_aoi;
       if (lookedId) c.domCounts[lookedId] = (c.domCounts[lookedId] || 0) + 1;
-      // « sur la cible » si l'AOI courante == cible
-      if (p.viz_state && p.viz_state.current_aoi && c.target && p.viz_state.current_aoi === c.target) c.onTarget++;
+      // Proximité continue à la cible : 100% si pile dessus, dégradé en s'éloignant.
+      if (typeof p.target_x === 'number' && typeof p.target_y === 'number') {
+        var d = Math.hypot(p.x - p.target_x, p.y - p.target_y);
+        c.proxSum += _proximityScore(d); c.proxN++;
+      }
       if (c.tFirst == null) c.tFirst = p.t_rel_ms;
       c.tLast = p.t_rel_ms;
     });
@@ -48,7 +61,8 @@
       var mostLooked = null, mostN = 0;
       Object.keys(c.domCounts).forEach(function (id) { if (c.domCounts[id] > mostN) { mostN = c.domCounts[id]; mostLooked = id; } });
       var durMs = (c.tFirst != null && c.tLast != null) ? Math.round(c.tLast - c.tFirst) : 0;
-      var rate = c.n ? Math.round(100 * c.onTarget / c.n) : 0;
+      // Score « sur la cible » = moyenne des proximités (continu, 0–100%).
+      var rate = c.proxN ? Math.round(100 * c.proxSum / c.proxN) : null;
       return {
         stimulus: k, view: c.view, target: c.target, points: c.n,
         most_looked: mostLooked, on_target_pct: rate, duration_ms: durMs,
@@ -137,13 +151,15 @@
         + '</tr></thead><tbody>';
       rows.forEach(function (r) {
         var hit = r.target && r.most_looked === r.target;
-        var col = r.on_target_pct >= 50 ? '#27ae60' : r.on_target_pct >= 20 ? '#e0a96a' : '#e74c3c';
+        var hasScore = typeof r.on_target_pct === 'number';
+        var col = !hasScore ? '#9aa6c0' : r.on_target_pct >= 50 ? '#27ae60' : r.on_target_pct >= 20 ? '#e0a96a' : '#e74c3c';
+        var scoreTxt = hasScore ? (r.on_target_pct + '%') : '—';
         tbl += '<tr>'
           + '<td style="padding:7px 10px;border-bottom:1px solid rgba(120,140,200,.1);">' + _esc(r.stimulus) + '</td>'
           + '<td style="padding:7px 10px;border-bottom:1px solid rgba(120,140,200,.1);">' + _esc(r.view) + '</td>'
           + '<td style="padding:7px 10px;border-bottom:1px solid rgba(120,140,200,.1);">' + _esc(r.target) + '</td>'
           + '<td style="padding:7px 10px;border-bottom:1px solid rgba(120,140,200,.1);">' + (hit?'✓ ':'') + _esc(r.most_looked) + '</td>'
-          + '<td style="padding:7px 10px;border-bottom:1px solid rgba(120,140,200,.1);color:' + col + ';font-weight:700;">' + r.on_target_pct + '%</td>'
+          + '<td style="padding:7px 10px;border-bottom:1px solid rgba(120,140,200,.1);color:' + col + ';font-weight:700;">' + scoreTxt + '</td>'
           + '<td style="padding:7px 10px;border-bottom:1px solid rgba(120,140,200,.1);">' + r.points + '</td>'
           + '<td style="padding:7px 10px;border-bottom:1px solid rgba(120,140,200,.1);">' + (r.duration_ms/1000).toFixed(1) + ' s</td>'
           + '</tr>';
@@ -156,17 +172,33 @@
         + 'Les statistiques globales et le parcours du regard restent disponibles.</p>';
     }
 
-    // ── Onglet PARCOURS (heatmap + scanpath sur fond propre) ──
+    // ── Onglet PARCOURS : 3 heatmaps, une par page, sur le VRAI graphique ──
+    var res = sess.screen_resolution || { width: 1920, height: 1080 };
     var paneP = document.createElement('div');
     paneP.style.display = 'none';
-    var res = sess.screen_resolution || { width: 1920, height: 1080 };
-    var cw = 900, ch = Math.round(cw * res.height / res.width);
-    paneP.innerHTML =
-      '<h3 style="color:#6c8cff;margin:0 0 10px;">Parcours du regard (heatmap densité + scanpath des fixations)</h3>'
-      + '<canvas id="rv-canvas" width="' + cw + '" height="' + ch + '" '
-      + 'style="width:100%;max-width:' + cw + 'px;background:#0a0f1e;border:1px solid rgba(120,140,200,.25);border-radius:10px;"></canvas>'
-      + '<p style="color:#9aa6c0;font-size:.8rem;margin-top:8px;">'
-      + '⬤ densité du regard (bleu→rouge) · ● fixations numérotées (∝ durée) · — chemin temporel</p>';
+    // Les 3 vues + le chart correspondant (si disponible dans la page hôte).
+    var VIEWS = [
+      { key:'bar',     title:'Bar Chart',    chart: global.BarChart,     cid:'rv-bar' },
+      { key:'line',    title:'Line Chart',   chart: global.LineChart,    cid:'rv-line' },
+      { key:'scatter', title:'Scatter Plot', chart: global.ScatterChart, cid:'rv-scatter' },
+    ];
+    var hasCharts = VIEWS.some(function (v){ return v.chart && typeof v.chart.init === 'function'; });
+    var inner = '<h3 style="color:#6c8cff;margin:0 0 10px;">Parcours du regard — heatmap par page</h3>';
+    if (!hasCharts) {
+      inner += '<p style="color:#9aa6c0;font-size:.82rem;">Les graphiques ne sont pas chargés sur cette page : '
+        + 'heatmap affichée sur fond neutre, mise à l\'échelle de l\'écran de test.</p>';
+    }
+    VIEWS.forEach(function (v) {
+      inner += '<div style="margin-bottom:22px;">'
+        + '<div style="color:#4ecdc4;font-weight:600;margin-bottom:6px;">' + v.title + '</div>'
+        + '<div id="' + v.cid + '-wrap" style="position:relative;width:100%;max-width:900px;'
+        + 'aspect-ratio:' + res.width + '/' + res.height + ';background:#0a0f1e;border:1px solid rgba(120,140,200,.25);border-radius:10px;overflow:hidden;">'
+        + '<div id="' + v.cid + '-chart" style="position:absolute;inset:0;"></div>'
+        + '<canvas id="' + v.cid + '-hm" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;"></canvas>'
+        + '</div></div>';
+    });
+    inner += '<p style="color:#9aa6c0;font-size:.8rem;">⬤ densité du regard (bleu→rouge) · ● fixations numérotées (∝ durée) · — chemin temporel</p>';
+    paneP.innerHTML = inner;
 
     body.appendChild(paneA);
     body.appendChild(paneP);
@@ -181,24 +213,49 @@
       });
     }
     styleTab(tabA);
+    var _drawn = false;
     tabA.addEventListener('click', function () { styleTab(tabA); paneA.style.display=''; paneP.style.display='none'; });
     tabP.addEventListener('click', function () {
       styleTab(tabP); paneA.style.display='none'; paneP.style.display='';
-      drawScan(data, res, cw, ch);
+      if (!_drawn) { _drawn = true; setTimeout(function () { drawAllPages(data, res, VIEWS); }, 60); }
     });
     document.getElementById('rv-close').addEventListener('click', hide);
   }
 
-  // Heatmap + scanpath mis à l'échelle de la résolution de la session.
-  function drawScan(data, res, cw, ch) {
-    var cv = document.getElementById('rv-canvas'); if (!cv) return;
-    var ctx = cv.getContext('2d');
-    ctx.clearRect(0, 0, cw, ch);
-    var sx = cw / res.width, sy = ch / res.height;
-    var raw = data.raw_gaze_data || [];
+  // Rendu des 3 pages : (re)dessine chaque graphique puis la heatmap par-dessus.
+  function drawAllPages(data, res, views) {
+    views.forEach(function (v) {
+      var wrap = document.getElementById(v.cid + '-wrap');
+      if (!wrap) return;
+      // 1. (Re)dessiner le vrai graphique en fond, si dispo.
+      if (v.chart && typeof v.chart.init === 'function') {
+        try { v.chart.init(v.cid + '-chart'); } catch (_) {}
+      }
+      // 2. Heatmap des points de CETTE page, mise à l'échelle du conteneur.
+      var rect = wrap.getBoundingClientRect();
+      var cv = document.getElementById(v.cid + '-hm');
+      var W = Math.round(rect.width), H = Math.round(rect.height);
+      cv.width = W; cv.height = H;
+      drawPageHeatmap(cv, data, v.key, res.width, res.height, W, H);
+    });
+  }
 
+  // Dessine heatmap + scanpath des points dont viz_state.active_view == viewKey.
+  function drawPageHeatmap(cv, data, viewKey, srcW, srcH, W, H) {
+    var ctx = cv.getContext('2d');
+    ctx.clearRect(0, 0, W, H);
+    var sx = W / srcW, sy = H / srcH;
+    // Filtrer les points de cette page.
+    var raw = (data.raw_gaze_data || []).filter(function (p) {
+      return p.viz_state && p.viz_state.active_view === viewKey;
+    });
+    if (!raw.length) {
+      ctx.fillStyle = 'rgba(154,166,192,.6)'; ctx.font = '13px Arial'; ctx.textAlign = 'center';
+      ctx.fillText('Aucun regard enregistré sur cette page', W/2, H/2);
+      return;
+    }
     // Heatmap (grille gaussienne)
-    var cell = 10, cols = Math.ceil(cw/cell), rows2 = Math.ceil(ch/cell);
+    var cell = 10, cols = Math.ceil(W/cell), rows2 = Math.ceil(H/cell);
     var grid = new Float32Array(cols*rows2), maxV = 0, R = 3;
     raw.forEach(function (p) {
       var gx = Math.floor(p.x*sx/cell), gy = Math.floor(p.y*sy/cell);
@@ -215,21 +272,22 @@
       else{r=255;g=Math.round(255*(1-(t-0.75)/0.25));b=0;} return 'rgba('+r+','+g+','+b+',';}
     if (maxV>0) for (var r2=0;r2<rows2;r2++) for (var c2=0;c2<cols;c2++){
       var v=grid[r2*cols+c2]/maxV; if(v<0.05) continue;
-      ctx.fillStyle=heat(v)+(0.4*Math.min(1,v+0.3))+')';
+      // Opacité plus faible pour laisser voir le graphique en dessous.
+      ctx.fillStyle=heat(v)+(0.32*Math.min(1,v+0.3))+')';
       ctx.fillRect(c2*cell,r2*cell,cell,cell);
     }
-    // Scanpath sur fixations
+    // Scanpath : fixations de cette page (approximées via les points filtrés).
     var fx=(data.events||[]).filter(function(e){return e.type==='fixation';})
       .map(function(f){return {x:(f.details&&f.details.x)*sx,y:(f.details&&f.details.y)*sy,d:f.duration};})
       .filter(function(f){return isFinite(f.x)&&isFinite(f.y);});
-    ctx.strokeStyle='rgba(108,140,255,0.85)'; ctx.lineWidth=2; ctx.beginPath();
+    ctx.strokeStyle='rgba(108,140,255,0.7)'; ctx.lineWidth=1.5; ctx.beginPath();
     fx.forEach(function(f,i){ i?ctx.lineTo(f.x,f.y):ctx.moveTo(f.x,f.y); }); ctx.stroke();
     fx.forEach(function(f,i){
-      var r=Math.max(6,Math.min(22,7+(f.d||0)/50));
+      var r=Math.max(5,Math.min(18,6+(f.d||0)/55));
       ctx.beginPath(); ctx.arc(f.x,f.y,r,0,Math.PI*2);
-      ctx.fillStyle='rgba(78,205,196,0.3)'; ctx.fill();
-      ctx.strokeStyle='#4ecdc4'; ctx.lineWidth=2; ctx.stroke();
-      ctx.fillStyle='#fff'; ctx.font='bold 11px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      ctx.fillStyle='rgba(78,205,196,0.28)'; ctx.fill();
+      ctx.strokeStyle='#4ecdc4'; ctx.lineWidth=1.5; ctx.stroke();
+      ctx.fillStyle='#fff'; ctx.font='bold 10px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
       ctx.fillText(String(i+1), f.x, f.y);
     });
   }

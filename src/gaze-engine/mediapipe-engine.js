@@ -669,6 +669,17 @@
       return true;
     },
 
+    // Échantillon de POURSUITE (smooth pursuit) : on enregistre les features
+    // courantes instantanées (sans la barrière de stabilité, puisque le regard se
+    // déplace en suivant la cible). On rejette seulement les clignements. Poids un
+    // peu plus faible car le regard est en mouvement.
+    recordPursuitSample(x, y) {
+      const f = _lastFeatures;
+      if (!f || f._eyeOpen < CONFIG.EYE_OPEN_MIN) return false;
+      _samples.push({ features: f.slice(), weight: 0.6, x, y });
+      return true;
+    },
+
     // Résout la régression ridge sur features STANDARDISÉES, pondérée par la qualité
     // des échantillons [#4bis], avec λ choisi par validation croisée [#5bis].
     trainFromSamples() {
