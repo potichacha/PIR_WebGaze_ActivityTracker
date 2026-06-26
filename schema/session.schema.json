@@ -94,6 +94,8 @@
         "source_module": { "type": "string", "description": "Moteur émetteur : 'webgazer' | 'mediapipe'." },
         "test_case_id":  { "type": "string", "description": "Identifiant du stimulus du test guidé en cours." },
         "target_aoi_id": { "type": "string", "description": "AOI ciblée par le stimulus (cercle rouge)." },
+        "target_x":      { "type": "number", "description": "Position écran X du centre de la cible (px)." },
+        "target_y":      { "type": "number", "description": "Position écran Y du centre de la cible (px)." },
         "dom":       { "$ref": "#/definitions/domDescriptor" },
         "viz_state": { "$ref": "#/definitions/vizState" }
       }

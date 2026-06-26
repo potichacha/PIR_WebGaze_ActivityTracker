@@ -362,3 +362,5 @@ const ScatterChart = (function () {
 
   return { init, getAOIs, setGazeMode, gazeDwelling, gazeHover, gazeLeave, data: DATA };
 })();
+
+if (typeof window !== 'undefined') window.ScatterChart = ScatterChart;

@@ -53,6 +53,34 @@ section('Test 3 : robustesse');
 assert(R.analyze({}).length === 0, 'aucune donnée → []');
 assert(R.analyze({ raw_gaze_data: [{ x:1, y:1 }] }).length === 0, 'aucun stimulus étiqueté → []');
 
+section('Test 4 : la heatmap des pages PEINT réellement');
+// DOM/canvas simulé qui compte les fillRect (cellules de heatmap dessinées).
+(function () {
+  var fillRectCalls = 0, initCalls = [];
+  function fakeCtx() {
+    return { clearRect:function(){}, fillRect:function(){ fillRectCalls++; }, beginPath:function(){},
+      arc:function(){}, fill:function(){}, stroke:function(){}, moveTo:function(){}, lineTo:function(){}, fillText:function(){},
+      set fillStyle(v){}, set strokeStyle(v){}, set lineWidth(v){}, set font(v){}, set textAlign(v){}, set textBaseline(v){} };
+  }
+  var store = {};
+  function el(id) { if (store[id]) return store[id];
+    store[id] = { id:id, style:{}, width:0, height:0,
+      getContext:function(){ return fakeCtx(); },
+      getBoundingClientRect:function(){ return { width:880, height:495 }; } };
+    return store[id];
+  }
+  global.document = { getElementById: el };
+  global.BarChart = { init:function(c){ initCalls.push(c); } };
+  global.LineChart = { init:function(c){ initCalls.push(c); } };
+  global.ScatterChart = { init:function(c){ initCalls.push(c); } };
+  var raw = [];
+  for (var i = 0; i < 300; i++) raw.push({ x:500+(i%60), y:300+(i%40), viz_state:{ active_view:'bar' } });
+  var data = { session:{ screen_resolution:{ width:1920, height:1080 } }, raw_gaze_data: raw, events: [] };
+  R._drawAllPages(data, { width:1920, height:1080 }, R._VIEWS());
+  assert(fillRectCalls > 0, 'la heatmap dessine des cellules (' + fillRectCalls + ' cells)');
+  assert(initCalls.length === 3, 'les 3 graphiques sont re-dessinés en fond');
+})();
+
 console.log('\n════════════════════════════════════');
 console.log('  Résultats : ' + passed + ' ✓ réussis / ' + failed + ' ✗ échoués');
 console.log('════════════════════════════════════\n');

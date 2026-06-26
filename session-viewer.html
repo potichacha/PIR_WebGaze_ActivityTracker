@@ -41,7 +41,7 @@
   <header>
     <h1>WebGaze — Sessions de test enregistrées</h1>
     <a href="choose.html" style="margin-left:auto;">← Accueil</a>
-    <a href="test-session.html">+ Nouvelle session</a>
+    <a href="choose.html">+ Nouvelle session</a>
   </header>
 
   <div class="bar">
@@ -89,13 +89,9 @@
           <h3>Chronologie (fixations / saccades / stimuli)</h3>
           <svg id="timeline" width="100%" height="170"></svg>
         </div>
-        <div class="viz-box" style="flex:1;min-width:320px;">
-          <h3>Parcours du regard (scanpath + heatmap)</h3>
-          <canvas id="mini-scan" width="480" height="300" style="width:100%;background:#0a0f1e;border-radius:8px;"></canvas>
-        </div>
       </div>
       <div class="viz-row">
-        <button id="btn-fullviz">Résultats détaillés (analyse + parcours)</button>
+        <button id="btn-fullviz" style="background:#6c8cff;font-weight:700;padding:12px 20px;">📊 Voir les 3 pages avec la heatmap (résultats détaillés)</button>
         <button id="btn-dl-json" class="ghost">Télécharger JSON</button>
         <button id="btn-dl-csv" class="ghost">Télécharger CSV</button>
         <button id="btn-del" class="danger">Supprimer cette session</button>
@@ -104,14 +100,15 @@
     </div>
   </div>
 
-  <script src="src/logger/gaze-logger.js"></script>
-  <script src="src/session-store/session-store.js"></script>
-  <script src="src/gaze-viz/gaze-viz.js"></script>
-  <script src="src/barchart/barchart.js"></script>
-  <script src="src/linechart/linechart.js"></script>
-  <script src="src/scatterchart/scatterchart.js"></script>
-  <script src="src/results-view/results-view.js"></script>
-  <script src="src/compare/compare.js"></script>
+  <script src="src/calibration/calibration.js?v=3"></script>
+  <script src="src/logger/gaze-logger.js?v=3"></script>
+  <script src="src/session-store/session-store.js?v=3"></script>
+  <script src="src/gaze-viz/gaze-viz.js?v=3"></script>
+  <script src="src/barchart/barchart.js?v=3"></script>
+  <script src="src/linechart/linechart.js?v=3"></script>
+  <script src="src/scatterchart/scatterchart.js?v=3"></script>
+  <script src="src/results-view/results-view.js?v=3"></script>
+  <script src="src/compare/compare.js?v=3"></script>
 
   <script>
   (function () {
@@ -162,7 +159,7 @@
       var total = SessionStore.count();
       document.getElementById('count').textContent = rows.length + ' / ' + total + ' session(s)';
       var el = document.getElementById('list');
-      if (!total) { el.innerHTML = '<div class="empty">Aucune session. Lancez une <a href="index.html" style="color:#4ecdc4">session de test</a>.</div>'; return; }
+      if (!total) { el.innerHTML = '<div class="empty">Aucune session. Lancez une <a href="choose.html" style="color:#4ecdc4">session de test</a>.</div>'; return; }
       if (!rows.length) { el.innerHTML = '<div class="empty">Aucune session ne correspond aux filtres.</div>'; return; }
 
       var arrow = function (k) { return _sortKey===k ? (_sortDir<0?' ▼':' ▲') : ''; };
@@ -239,7 +236,6 @@
         + '<div><b>Points / Fixations / Saccades</b> : ' + s.n_points + ' / ' + s.n_fixations + ' / ' + s.n_saccades + '</div>'
         + '<div><b>Hits AOI</b> : ' + fmt(s.n_aoi_hits) + '</div>';
       drawTimeline(data);
-      drawMiniScan(data);
       document.getElementById('cmp').textContent = '';
     }
 
@@ -268,32 +264,6 @@
       });
       svg.append('text').attr('x',6).attr('y',54).style('fill','#27ae60').style('font-size','11px').text('Fix');
       svg.append('text').attr('x',6).attr('y',94).style('fill','#6c8cff').style('font-size','11px').text('Sacc');
-    }
-
-    // Mini scanpath + heatmap, mis à l'échelle de la résolution de la session.
-    function drawMiniScan(data) {
-      var cv = document.getElementById('mini-scan'); var ctx = cv.getContext('2d');
-      ctx.clearRect(0,0,cv.width,cv.height);
-      var sess = data.session||{}; var res = sess.screen_resolution||{width:1920,height:1080};
-      var sx = cv.width/res.width, sy = cv.height/res.height;
-      var raw = data.raw_gaze_data||[];
-      // points
-      ctx.fillStyle='rgba(78,205,196,0.25)';
-      raw.forEach(function(p){ ctx.beginPath(); ctx.arc(p.x*sx, p.y*sy, 2, 0, Math.PI*2); ctx.fill(); });
-      // scanpath sur fixations
-      var fx = (data.events||[]).filter(function(e){return e.type==='fixation';})
-        .map(function(f){ return { x:(f.details&&f.details.x)*sx, y:(f.details&&f.details.y)*sy, d:f.duration }; })
-        .filter(function(f){ return isFinite(f.x)&&isFinite(f.y); });
-      ctx.strokeStyle='rgba(108,140,255,0.8)'; ctx.lineWidth=1.5; ctx.beginPath();
-      fx.forEach(function(f,i){ i?ctx.lineTo(f.x,f.y):ctx.moveTo(f.x,f.y); }); ctx.stroke();
-      fx.forEach(function(f,i){
-        var r=Math.max(4,Math.min(16,6+(f.d||0)/60));
-        ctx.beginPath(); ctx.arc(f.x,f.y,r,0,Math.PI*2);
-        ctx.fillStyle='rgba(78,205,196,0.3)'; ctx.fill();
-        ctx.strokeStyle='#4ecdc4'; ctx.lineWidth=1.5; ctx.stroke();
-        ctx.fillStyle='#fff'; ctx.font='10px Arial'; ctx.textAlign='center'; ctx.textBaseline='middle';
-        ctx.fillText(String(i+1), f.x, f.y);
-      });
     }
 
     // ── Actions ──
@@ -348,7 +318,10 @@
       if (ids.length !== 2) return;
       var a = SessionStore.get(ids[0]), b = SessionStore.get(ids[1]);
       var sa = SessionStore.summarize(a), sb = SessionStore.summarize(b);
-      showCompare(Compare.compare(a, b, sa.participant + ' (' + (sa.engine||'?') + ')', sb.participant + ' (' + (sb.engine||'?') + ')'));
+      // Label distinct : nom + moteur + date/heure (pour différencier 2 sessions du même nom).
+      function lbl(s, sess){ var t=(sess.session&&sess.session.start_time||'').replace('T',' ').slice(5,16);
+        return s.participant + ' · ' + (s.engine||'?') + ' · ' + t; }
+      showCompare(Compare.compare(a, b, lbl(sa, a), lbl(sb, b)));
     });
 
     // ── Comparaison : groupe WebGazer ↔ groupe MediaPipe (sur les sessions filtrées) ──
@@ -360,40 +333,78 @@
       showCompare(Compare.compare(wg, mp, 'WebGazer (' + wg.length + ')', 'MediaPipe (' + mp.length + ')'));
     });
 
-    // Affiche le tableau de comparaison (propre et lisible).
+    // Affiche la comparaison : BILAN écrit en français d'abord, puis le tableau.
     function showCompare(cmp) {
       var ov = document.getElementById('cmp-overlay');
       var body = document.getElementById('cmp-body');
       function cell(val, unit){ return (val==null) ? '—' : (val + (unit?(' '+unit):'')); }
-      var html = '<table style="width:100%;border-collapse:collapse;font-size:.92rem;">'
+      function rowByKey(k){ return cmp.rows.find(function(r){ return r.key===k; }); }
+      function nameOf(side){ return side==='A' ? cmp.labelA : cmp.labelB; }
+
+      // ── 1. BILAN ÉCRIT (phrases simples) ──
+      var aWins = cmp.rows.filter(function(r){return r.better==='A';}).length;
+      var bWins = cmp.rows.filter(function(r){return r.better==='B';}).length;
+      var winner = aWins===bWins ? null : (aWins>bWins ? 'A' : 'B');
+      var verdictColor = '#6c8cff';
+      var verdictTxt = winner==null
+        ? '⚖️ Les deux sessions se valent globalement (' + aWins + ' critère(s) gagné(s) chacune).'
+        : '🏆 ' + nameOf(winner) + ' est globalement meilleure (' + Math.max(aWins,bWins) + ' critères de qualité sur ' + (aWins+bWins||1) + ').';
+
+      // Phrases détaillées sur les 3 critères clés.
+      var phrases = [];
+      var cal = rowByKey('calib_px');
+      if (cal && cal.a!=null && cal.b!=null) {
+        if (cal.a===cal.b) phrases.push('La précision de calibration est identique (' + cal.a + ' px).');
+        else phrases.push('La calibration est plus précise pour <b>' + nameOf(cal.better) + '</b> ('
+          + Math.min(cal.a,cal.b) + ' px contre ' + Math.max(cal.a,cal.b) + ' px) — plus c\'est bas, mieux c\'est.');
+      }
+      var ot = rowByKey('on_target');
+      if (ot && ot.a!=null && ot.b!=null) {
+        if (ot.a===ot.b) phrases.push('Le regard tombe aussi souvent sur les cibles dans les deux cas (' + ot.a + ' %).');
+        else phrases.push('Le regard atteint mieux les cibles pour <b>' + nameOf(ot.better) + '</b> ('
+          + Math.max(ot.a,ot.b) + ' % contre ' + Math.min(ot.a,ot.b) + ' %).');
+      }
+      var cf = rowByKey('confidence');
+      if (cf && cf.a!=null && cf.b!=null && cf.a!==cf.b) {
+        phrases.push('La confiance des prédictions est meilleure pour <b>' + nameOf(cf.better) + '</b> ('
+          + Math.max(cf.a,cf.b) + ' contre ' + Math.min(cf.a,cf.b) + ').');
+      }
+
+      var html = '<div style="background:#16213e;border-radius:12px;padding:18px 22px;margin-bottom:22px;">'
+        + '<div style="font-size:1.15rem;font-weight:700;color:' + verdictColor + ';margin-bottom:10px;">' + verdictTxt + '</div>'
+        + '<ul style="margin:0;padding-left:20px;line-height:1.9;font-size:.95rem;color:#dfe6f5;">'
+        + phrases.map(function(p){ return '<li>' + p + '</li>'; }).join('')
+        + '</ul>'
+        + '<div style="margin-top:12px;color:#9aa6c0;font-size:.8rem;">Comparaison sur ' + cmp.nA + ' vs ' + cmp.nB
+        + ' session(s)' + (cmp.nA>1||cmp.nB>1 ? ' (valeurs = moyennes du groupe)' : '') + '.</div>'
+        + '</div>';
+
+      // ── 2. TABLEAU DÉTAILLÉ (badges clairs) ──
+      html += '<h3 style="color:#4ecdc4;margin:0 0 8px;">Détail par métrique</h3>'
+        + '<table style="width:100%;border-collapse:collapse;font-size:.92rem;">'
         + '<thead><tr style="color:#4ecdc4;text-align:left;">'
         + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">Métrique</th>'
         + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">' + cmp.labelA + '</th>'
         + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">' + cmp.labelB + '</th>'
-        + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">Différence (B−A)</th>'
-        + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">Meilleur</th>'
+        + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">Écart</th>'
+        + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">Gagnant</th>'
         + '</tr></thead><tbody>';
       cmp.rows.forEach(function (r) {
         var aCol = r.better==='A' ? 'color:#27ae60;font-weight:700;' : '';
         var bCol = r.better==='B' ? 'color:#27ae60;font-weight:700;' : '';
-        var betterTxt = r.better==='A' ? '◀ ' + cmp.labelA : r.better==='B' ? cmp.labelB + ' ▶' : (r.lowerBetter==null ? '(neutre)' : '=');
+        var badge;
+        if (r.better==='A') badge = '<span style="background:#27ae60;color:#fff;padding:2px 9px;border-radius:999px;font-size:.78rem;">' + cmp.labelA + '</span>';
+        else if (r.better==='B') badge = '<span style="background:#27ae60;color:#fff;padding:2px 9px;border-radius:999px;font-size:.78rem;">' + cmp.labelB + '</span>';
+        else badge = '<span style="color:#9aa6c0;">égalité</span>';
         html += '<tr>'
-          + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);">' + r.label + (r.lowerBetter===true?' (↓ mieux)':r.lowerBetter===false?' (↑ mieux)':'') + '</td>'
+          + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);">' + r.label + (r.lowerBetter===true?' <span style="color:#9aa6c0;">(bas = mieux)</span>':r.lowerBetter===false?' <span style="color:#9aa6c0;">(haut = mieux)</span>':'') + '</td>'
           + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);' + aCol + '">' + cell(r.a, r.unit) + '</td>'
           + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);' + bCol + '">' + cell(r.b, r.unit) + '</td>'
           + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);color:#9aa6c0;">' + (r.diff==null?'—':(r.diff>0?'+':'')+r.diff+(r.unit?(' '+r.unit):'')) + '</td>'
-          + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);">' + betterTxt + '</td>'
+          + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);">' + badge + '</td>'
           + '</tr>';
       });
       html += '</tbody></table>';
-      // Synthèse : qui gagne sur le plus de critères « qualité ».
-      var aWins = cmp.rows.filter(function(r){return r.better==='A';}).length;
-      var bWins = cmp.rows.filter(function(r){return r.better==='B';}).length;
-      var verdict = aWins===bWins ? 'Égalité sur les critères de qualité.'
-        : (aWins>bWins ? cmp.labelA + ' est meilleur (' + aWins + ' vs ' + bWins + ' critères)' : cmp.labelB + ' est meilleur (' + bWins + ' vs ' + aWins + ' critères)');
-      html += '<p style="margin-top:18px;font-size:1rem;font-weight:700;color:#6c8cff;">→ ' + verdict + '</p>'
-        + '<p style="color:#9aa6c0;font-size:.8rem;">Comparaison sur ' + cmp.nA + ' vs ' + cmp.nB + ' session(s). '
-        + 'Pour les groupes, chaque valeur est une moyenne.</p>';
       body.innerHTML = html;
       ov.style.display = 'flex';
     }

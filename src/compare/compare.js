@@ -66,7 +66,7 @@
     var tRel = raw.map(function (p) { return p.t_rel_ms; }).filter(function (v) { return typeof v === 'number'; });
     var dur = tRel.length ? (Math.max.apply(null, tRel) - Math.min.apply(null, tRel)) / 1000 : null;
     return {
-      calib_px:   _num(cal.mean_error_px),
+      calib_px:   cal.mean_error_px != null ? Math.round(cal.mean_error_px) : null,
       on_target:  _onTargetAvg(data),
       confidence: confs.length ? +( _mean(confs).toFixed(2) ) : null,
       lux:        luxVals.length ? Math.round(_median(luxVals)) : null,

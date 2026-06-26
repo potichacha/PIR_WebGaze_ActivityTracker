@@ -18,6 +18,16 @@
 
   function hide() { var e = document.getElementById(ID); if (e) e.remove(); }
 
+  // Résout un module de graphique par son nom, en cherchant dans window puis global.
+  function _chartFor(v) {
+    var name = v.chartName;
+    var w = (typeof window !== 'undefined') ? window[name] : null;
+    if (w && typeof w.init === 'function') return w;
+    var g = global[name];
+    if (g && typeof g.init === 'function') return g;
+    return null;
+  }
+
   // Bouton flottant persistant « Voir les résultats du test » : permet de rouvrir
   // l'écran de résultats à tout moment après le test.
   function showButton(data) {
@@ -193,13 +203,14 @@
     var res = sess.screen_resolution || { width: 1920, height: 1080 };
     var paneP = document.createElement('div');
     paneP.style.display = 'none';
-    // Les 3 vues + le chart correspondant (si disponible dans la page hôte).
+    // Les 3 vues. On RÉSOUT le chart au moment du rendu (pas ici), car le module
+    // peut être chargé après. _chartFor lit window/global de façon robuste.
     var VIEWS = [
-      { key:'bar',     title:'Bar Chart',    chart: global.BarChart,     cid:'rv-bar' },
-      { key:'line',    title:'Line Chart',   chart: global.LineChart,    cid:'rv-line' },
-      { key:'scatter', title:'Scatter Plot', chart: global.ScatterChart, cid:'rv-scatter' },
+      { key:'bar',     title:'Bar Chart',    chartName:'BarChart',     cid:'rv-bar' },
+      { key:'line',    title:'Line Chart',   chartName:'LineChart',    cid:'rv-line' },
+      { key:'scatter', title:'Scatter Plot', chartName:'ScatterChart', cid:'rv-scatter' },
     ];
-    var hasCharts = VIEWS.some(function (v){ return v.chart && typeof v.chart.init === 'function'; });
+    var hasCharts = VIEWS.some(function (v){ var c=_chartFor(v); return c && typeof c.init === 'function'; });
     var inner = '<h3 style="color:#6c8cff;margin:0 0 10px;">Parcours du regard — heatmap par page</h3>';
     if (!hasCharts) {
       inner += '<p style="color:#9aa6c0;font-size:.82rem;">Les graphiques ne sont pas chargés sur cette page : '
@@ -234,27 +245,53 @@
     }
     styleTab(tabA);
     var _drawn = false;
+    function ensureParcoursDrawn() {
+      if (_drawn) return; _drawn = true;
+      setTimeout(function () { drawAllPages(data, res, VIEWS); }, 80);
+    }
     tabA.addEventListener('click', function () { styleTab(tabA); paneA.style.display=''; paneP.style.display='none'; });
     tabP.addEventListener('click', function () {
       styleTab(tabP); paneA.style.display='none'; paneP.style.display='';
-      if (!_drawn) { _drawn = true; setTimeout(function () { drawAllPages(data, res, VIEWS); }, 60); }
+      // Le pane doit être VISIBLE avant de mesurer/dessiner.
+      _drawn = false; ensureParcoursDrawn();
     });
     document.getElementById('rv-close').addEventListener('click', hide);
+
+    // Pré-rendu : on dessine aussi les 3 pages dès l'ouverture (le pane est masqué
+    // mais on lui donne temporairement des dimensions pour mesurer), afin que la
+    // heatmap soit prête même si l'utilisateur n'a pas encore cliqué sur l'onglet.
+    setTimeout(function () {
+      var prev = paneP.style.display;
+      paneP.style.visibility = 'hidden'; paneP.style.display = 'block';
+      drawAllPages(data, res, VIEWS);
+      paneP.style.display = prev; paneP.style.visibility = '';
+      _drawn = true;
+    }, 120);
   }
 
   // Rendu des 3 pages : (re)dessine chaque graphique puis la heatmap par-dessus.
+  // Appelé UNIQUEMENT quand l'onglet « Parcours » est visible (sinon les tailles
+  // de conteneur sont nulles et rien ne s'affiche).
   function drawAllPages(data, res, views) {
     views.forEach(function (v) {
       var wrap = document.getElementById(v.cid + '-wrap');
       if (!wrap) return;
-      // 1. (Re)dessiner le vrai graphique en fond, si dispo.
-      if (v.chart && typeof v.chart.init === 'function') {
-        try { v.chart.init(v.cid + '-chart'); } catch (_) {}
-      }
-      // 2. Heatmap des points de CETTE page, mise à l'échelle du conteneur.
+      // Dimensions fiables du conteneur (avec repli si la mesure échoue).
       var rect = wrap.getBoundingClientRect();
+      var W = Math.round(rect.width)  || 880;
+      var H = Math.round(rect.height) || Math.round(880 * res.height / res.width);
+
+      // 1. Dimensionner explicitement le conteneur du graphique puis le (re)dessiner.
+      var chartDiv = document.getElementById(v.cid + '-chart');
+      if (chartDiv) { chartDiv.style.width = W + 'px'; chartDiv.style.height = H + 'px'; }
+      var chart = _chartFor(v);
+      try { console.info('[ResultsView] page', v.key, '— graphique', v.chartName, chart ? 'TROUVÉ ✓' : 'INTROUVABLE ✗'); } catch (_) {}
+      if (chart && typeof chart.init === 'function') {
+        try { chart.init(v.cid + '-chart'); } catch (e) { try { console.warn('[ResultsView] init '+v.chartName+' a échoué', e); } catch(_){} }
+      }
+
+      // 2. Heatmap des points de CETTE page, par-dessus, mise à l'échelle.
       var cv = document.getElementById(v.cid + '-hm');
-      var W = Math.round(rect.width), H = Math.round(rect.height);
       cv.width = W; cv.height = H;
       drawPageHeatmap(cv, data, v.key, res.width, res.height, W, H);
     });
@@ -301,9 +338,17 @@
       ctx.fillStyle=heat(v)+alpha.toFixed(2)+')';
       ctx.fillRect(c2*cell,r2*cell,cell,cell);
     }
-    // Scanpath : fixations de cette page (approximées via les points filtrés).
-    var fx=(data.events||[]).filter(function(e){return e.type==='fixation';})
-      .map(function(f){return {x:(f.details&&f.details.x)*sx,y:(f.details&&f.details.y)*sy,d:f.duration};})
+    // Scanpath : fixations RECALCULÉES sur les seuls points de CETTE page (sinon on
+    // afficherait les mêmes fixations sur les 3 pages). On réutilise le détecteur
+    // I-DT du module Calibration s'il est chargé.
+    var pageFix = [];
+    if (global.Calibration && typeof global.Calibration.detectFixations === 'function') {
+      var pts = raw.map(function (p) { return { x:p.x, y:p.y, timestamp: p.timestamp != null ? p.timestamp : p.t_rel_ms }; });
+      pageFix = global.Calibration.detectFixations(pts, 80, 100)
+        .map(function (f) { return { x:f.x_center, y:f.y_center, d:f.duration }; });
+    }
+    var fx = pageFix
+      .map(function(f){return {x:f.x*sx,y:f.y*sy,d:f.d};})
       .filter(function(f){return isFinite(f.x)&&isFinite(f.y);});
     ctx.strokeStyle='rgba(108,140,255,0.7)'; ctx.lineWidth=1.5; ctx.beginPath();
     fx.forEach(function(f,i){ i?ctx.lineTo(f.x,f.y):ctx.moveTo(f.x,f.y); }); ctx.stroke();
@@ -317,6 +362,18 @@
     });
   }
 
-  global.ResultsView = { show: show, hide: hide, analyze: analyze, showButton: showButton, hideButton: hideButton };
+  global.ResultsView = {
+    show: show, hide: hide, analyze: analyze,
+    showButton: showButton, hideButton: hideButton,
+    // Exposé pour les tests : (re)dessine les 3 pages + heatmaps.
+    _drawAllPages: drawAllPages,
+    _VIEWS: function () {
+      return [
+        { key:'bar',     title:'Bar Chart',    chartName:'BarChart',     cid:'rv-bar' },
+        { key:'line',    title:'Line Chart',   chartName:'LineChart',    cid:'rv-line' },
+        { key:'scatter', title:'Scatter Plot', chartName:'ScatterChart', cid:'rv-scatter' },
+      ];
+    },
+  };
 
 })(typeof window !== 'undefined' ? window : global);
