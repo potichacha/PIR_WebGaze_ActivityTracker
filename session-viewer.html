@@ -41,7 +41,7 @@
   <header>
     <h1>WebGaze — Sessions de test enregistrées</h1>
     <a href="choose.html" style="margin-left:auto;">← Accueil</a>
-    <a href="test-session.html">+ Nouvelle session</a>
+    <a href="choose.html">+ Nouvelle session</a>
   </header>
 
   <div class="bar">
@@ -159,7 +159,7 @@
       var total = SessionStore.count();
       document.getElementById('count').textContent = rows.length + ' / ' + total + ' session(s)';
       var el = document.getElementById('list');
-      if (!total) { el.innerHTML = '<div class="empty">Aucune session. Lancez une <a href="index.html" style="color:#4ecdc4">session de test</a>.</div>'; return; }
+      if (!total) { el.innerHTML = '<div class="empty">Aucune session. Lancez une <a href="choose.html" style="color:#4ecdc4">session de test</a>.</div>'; return; }
       if (!rows.length) { el.innerHTML = '<div class="empty">Aucune session ne correspond aux filtres.</div>'; return; }
 
       var arrow = function (k) { return _sortKey===k ? (_sortDir<0?' ▼':' ▲') : ''; };

@@ -31,8 +31,9 @@ intégration dans un graphe de connaissances.
 - Un serveur HTTP local (la webcam `getUserMedia` ne fonctionne pas en `file://`).
 - [Node.js](https://nodejs.org/) pour lancer les tests (et, en option, le serveur).
 
-> **WebGazer.js** est chargé par les pages HTML. Vérifiez la balise `<script>`
-> correspondante dans `index.html` (CDN ou copie locale `webgazer.min.js`).
+> **WebGazer.js** est chargé par `index-webgazer.html` ; **MediaPipe tasks-vision**
+> par `index-mediapipe.html`. Les deux via CDN — une connexion internet est requise
+> au premier chargement (ou héberger les fichiers localement).
 
 ## Lancer l'application
 
@@ -49,10 +50,15 @@ npx http-server -p 8080
 Puis ouvrir **http://localhost:8080/choose.html** dans Chrome (plein écran `F11`
 recommandé). Cette page d'accueil permet de choisir le **moteur de suivi du regard** :
 
-- **WebGazer.js** (`index.html`) — solution clé-en-main, mapping écran intégré.
+- **WebGazer.js** (`index-webgazer.html`) — solution clé-en-main, mapping écran intégré.
 - **MediaPipe FaceLandmarker** (`index-mediapipe.html`) — détection iris haute
   précision + pose de tête, régression écran apprise à la calibration, compensation
   de tête native.
+
+Quel que soit le moteur : formulaire participant (nom/prénom/lunettes) → calibration
+→ scénario de test guidé automatique (cibles + exploration libre, sur 3 graphiques)
+→ écran de résultats. Les sessions sont consultables et comparables dans
+`session-viewer.html`.
 
 Autoriser la webcam, puis suivre le parcours :
 
@@ -77,12 +83,11 @@ fixations/saccades, capture). Aucune webcam requise — les API navigateur sont 
 
 ```
 .
-├── choose.html             Page d'accueil — choix du moteur (WebGazer / MediaPipe)
-├── index.html              Application WebGazer (calibration + démo + export)
-├── index-mediapipe.html    Application MediaPipe (même chaîne d'analyse)
-├── demo.html               Variante démo autonome (WebGazer)
-├── calibration.html        Page de calibration seule
-├── participant-form.html   Formulaire participant
+├── choose.html             Page d'accueil — choix du moteur + accès au visualiseur
+├── index-webgazer.html     Application WebGazer (formulaire → calibration → test → résultats)
+├── index-mediapipe.html    Application MediaPipe (même parcours, calibration clics ou poursuite)
+├── session-viewer.html     Consultation, tri/filtre, comparaison des sessions enregistrées
+├── index.html              Redirection vers choose.html (filet de compatibilité)
 ├── package.json            Scripts npm (serve, test, generate-data)
 ├── schema/
 │   └── session.schema.json JSON Schema du format d'export (draft-07)
@@ -90,14 +95,19 @@ fixations/saccades, capture). Aucune webcam requise — les API navigateur sont 
 │   ├── gaze-capture/       Module de capture WebGazer (GazeCapture)
 │   ├── gaze-engine/        Moteur MediaPipe : features iris + ridge (MediaPipeEngine)
 │   ├── calibration/        Calibration, filtres, I-DT/I-VT (Calibration)
-│   ├── logger/             Journalisation + export JSON/JSON-LD (GazeLogger)
-│   ├── gaze-viz/           Heatmap + scanpath du regard en fin de session (GazeViz)
+│   ├── logger/             Journalisation + export JSON/JSON-LD/CSV (GazeLogger)
+│   ├── session-store/      « BDD » localStorage des sessions (SessionStore)
+│   ├── ambient-light/      Mesure de luminosité ambiante (AmbientLight)
+│   ├── test-scenario/      Scénario de test guidé automatique (TestScenario)
+│   ├── results-view/       Écran de résultats : analyse + heatmaps par page (ResultsView)
+│   ├── compare/            Comparaison de sessions/groupes (Compare)
+│   ├── gaze-viz/           Heatmap + scanpath plein écran (GazeViz)
 │   ├── barchart/ linechart/ scatterchart/   Visualisations de démonstration
-├── tests/                  Tests unitaires Node (326 tests)
+├── tests/                  Tests unitaires Node (506 tests)
 ├── docs/
 │   └── LOG_FORMAT.md       Documentation du format de log
 ├── rapport/                Rapport technique (LaTeX)
-└── data/                   Jeux de données d'exemple (sessions JSON)
+└── data/                   Sessions JSON archivées (exportées depuis le viewer)
 ```
 
 ## Modules (API publique)
