@@ -963,8 +963,48 @@ function _startDriftMonitor() {
   }, 15000);
 }
 
+// ── Formulaire participant (nom / prénom / lunettes) ──────────────────────────
+function _showWebgazerForm(onDone) {
+  var ov = document.createElement('div');
+  ov.id = 'wg-form-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;z-index:100000;background:rgba(13,20,36,.96);'
+    + 'display:flex;align-items:center;justify-content:center;font-family:Arial,sans-serif;';
+  var inp = 'width:100%;background:#0d1b2a;border:1px solid #2c3e50;border-radius:8px;color:#eee;padding:10px 12px;margin-bottom:14px;box-sizing:border-box;font-size:.92rem;';
+  ov.innerHTML =
+    '<div style="background:#16213e;border-radius:16px;padding:30px 36px;width:92%;max-width:460px;color:#eee;">'
+    + '<h3 style="margin:0 0 18px;color:#4ecdc4;">Session de test — Données participant</h3>'
+    + '<label style="font-size:.82rem;color:#9aa6c0;">Prénom *</label>'
+    + '<input id="wgf-first" placeholder="Prénom" style="' + inp + '" />'
+    + '<label style="font-size:.82rem;color:#9aa6c0;">Nom *</label>'
+    + '<input id="wgf-last" placeholder="Nom" style="' + inp + '" />'
+    + '<label style="font-size:.82rem;color:#9aa6c0;">Lunettes / lentilles</label>'
+    + '<select id="wgf-glasses" style="' + inp + '"><option value="non">Non</option>'
+    + '<option value="lunettes">Lunettes</option><option value="lentilles">Lentilles</option></select>'
+    + '<div id="wgf-err" style="color:#e74c3c;font-size:.82rem;margin-bottom:10px;display:none;">Prénom et nom obligatoires.</div>'
+    + '<button id="wgf-go" style="background:#4ecdc4;color:#0f0f1a;border:none;border-radius:9px;padding:12px 20px;font-weight:700;width:100%;cursor:pointer;">Continuer vers la calibration →</button>'
+    + '</div>';
+  document.body.appendChild(ov);
+  document.getElementById('wgf-go').addEventListener('click', function () {
+    var first = document.getElementById('wgf-first').value.trim();
+    var last = document.getElementById('wgf-last').value.trim();
+    if (!first || !last) { document.getElementById('wgf-err').style.display = 'block'; return; }
+    _wgTestSession = {
+      first_name: first, last_name: last,
+      glasses: document.getElementById('wgf-glasses').value,
+      participant_id: (first[0] + last).toLowerCase().replace(/[^a-z0-9]/g, ''),
+      engine: 'webgazer',
+    };
+    ov.remove();
+    onDone();
+  });
+}
+
 // ── Calibration start button ──────────────────────────────────────────────────
 document.getElementById('btn-cal-start').addEventListener('click', function () {
+  _showWebgazerForm(_beginWebgazerCalibration);
+});
+
+function _beginWebgazerCalibration() {
   _stopWebgazerPreview(); // l'aperçu cède la main à la calibration
   const bar = document.getElementById('wg-status-bar');
   bar.className = '';
@@ -979,7 +1019,7 @@ document.getElementById('btn-cal-start').addEventListener('click', function () {
     // Scénario de test AUTOMATIQUE juste après la calibration.
     setTimeout(_startWebgazerScenario, 800);
   }, { alreadyStarted: _wgStarted });
-});
+}
 
 // ── Scénario de test automatique (WebGazer) ───────────────────────────────────
 var _wgTestSession = null;
@@ -988,7 +1028,8 @@ function _startWebgazerScenario() {
   // Aller à la section démo (les graphiques sont là).
   scrollToSection('section-demo');
   var cal = Calibration.getStoredData() || {};
-  GazeLogger.init('participant', { mean_error_px: cal.meanError, std_error_px: cal.stdError },
+  var pid = (_wgTestSession && _wgTestSession.participant_id) || 'participant';
+  GazeLogger.init(pid, { mean_error_px: cal.meanError, std_error_px: cal.stdError },
     _wgTestSession || { engine: 'webgazer' });
   GazeLogger.setModule('webgazer');
   GazeLogger.logInteraction('test_session_start', { participant: _wgTestSession || null });
@@ -1041,6 +1082,7 @@ function _finishWebgazerScenario() {
   SessionStore.save(data);
   try { GazeLogger.download(); } catch (_) {}
   ResultsView.show(data);
+  ResultsView.showButton(data); // bouton persistant pour rouvrir les résultats
 }
 
 // ── Reset button ──────────────────────────────────────────────────────────────

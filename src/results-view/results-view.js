@@ -14,8 +14,25 @@
   'use strict';
 
   var ID = 'results-view-overlay';
+  var BTN_ID = 'results-view-button';
 
   function hide() { var e = document.getElementById(ID); if (e) e.remove(); }
+
+  // Bouton flottant persistant « Voir les résultats du test » : permet de rouvrir
+  // l'écran de résultats à tout moment après le test.
+  function showButton(data) {
+    var old = document.getElementById(BTN_ID); if (old) old.remove();
+    var b = document.createElement('button');
+    b.id = BTN_ID;
+    b.textContent = '📊 Voir les résultats du test';
+    b.style.cssText =
+      'position:fixed;top:16px;left:50%;transform:translateX(-50%);z-index:99000;'
+      + 'background:#6c8cff;color:#fff;border:none;border-radius:10px;padding:12px 22px;'
+      + 'font-weight:700;font-size:.95rem;cursor:pointer;box-shadow:0 6px 20px rgba(0,0,0,.4);';
+    b.addEventListener('click', function () { show(data); });
+    document.body.appendChild(b);
+  }
+  function hideButton() { var b = document.getElementById(BTN_ID); if (b) b.remove(); }
 
   // ── Analyse par stimulus à partir de test_case_id / target_aoi_id ──────────────
   // Pour chaque stimulus (cercle rouge montré), on regarde les points de regard
@@ -197,7 +214,10 @@
         + '<canvas id="' + v.cid + '-hm" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;"></canvas>'
         + '</div></div>';
     });
-    inner += '<p style="color:#9aa6c0;font-size:.8rem;">⬤ densité du regard (bleu→rouge) · ● fixations numérotées (∝ durée) · — chemin temporel</p>';
+    inner += '<p style="color:#9aa6c0;font-size:.8rem;">Densité du regard : '
+      + '<span style="color:#3cb44b;">vert = peu regardé</span> → '
+      + '<span style="color:#e69632;">orange</span> → '
+      + '<span style="color:#e74c3c;">rouge = très regardé</span> · ● fixations (∝ durée) · — chemin temporel</p>';
     paneP.innerHTML = inner;
 
     body.appendChild(paneA);
@@ -254,26 +274,31 @@
       ctx.fillText('Aucun regard enregistré sur cette page', W/2, H/2);
       return;
     }
-    // Heatmap (grille gaussienne)
-    var cell = 10, cols = Math.ceil(W/cell), rows2 = Math.ceil(H/cell);
-    var grid = new Float32Array(cols*rows2), maxV = 0, R = 3;
+    // Heatmap (grille gaussienne, rayon plus large = zones plus lisses/lisibles).
+    var cell = 8, cols = Math.ceil(W/cell), rows2 = Math.ceil(H/cell);
+    var grid = new Float32Array(cols*rows2), maxV = 0, R = 5;
     raw.forEach(function (p) {
       var gx = Math.floor(p.x*sx/cell), gy = Math.floor(p.y*sy/cell);
       for (var dy=-R; dy<=R; dy++) for (var dx=-R; dx<=R; dx++) {
         var cx=gx+dx, cy=gy+dy; if (cx<0||cy<0||cx>=cols||cy>=rows2) continue;
-        var w = Math.exp(-(dx*dx+dy*dy)/(2*R)); var idx=cy*cols+cx;
+        var w = Math.exp(-(dx*dx+dy*dy)/(2*(R*0.6)*(R*0.6))); var idx=cy*cols+cx;
         grid[idx]+=w; if (grid[idx]>maxV) maxV=grid[idx];
       }
     });
+    // Palette VERT (peu regardé) → ORANGE → ROUGE (beaucoup regardé), comme demandé.
     function heat(t){ t=Math.max(0,Math.min(1,t)); var r,g,b;
-      if(t<0.25){r=0;g=Math.round(255*t/0.25);b=255;}
-      else if(t<0.5){r=0;g=255;b=Math.round(255*(1-(t-0.25)/0.25));}
-      else if(t<0.75){r=Math.round(255*(t-0.5)/0.25);g=255;b=0;}
-      else{r=255;g=Math.round(255*(1-(t-0.75)/0.25));b=0;} return 'rgba('+r+','+g+','+b+',';}
+      if(t<0.5){ // vert → orange
+        var u=t/0.5; r=Math.round(60+(230-60)*u); g=Math.round(180+(150-180)*u); b=Math.round(75+(40-75)*u);
+      } else { // orange → rouge vif
+        var u2=(t-0.5)/0.5; r=Math.round(230+(231-230)*u2); g=Math.round(150+(40-150)*u2); b=Math.round(40+(40-40)*u2);
+      }
+      return 'rgba('+r+','+g+','+b+',';
+    }
     if (maxV>0) for (var r2=0;r2<rows2;r2++) for (var c2=0;c2<cols;c2++){
-      var v=grid[r2*cols+c2]/maxV; if(v<0.05) continue;
-      // Opacité plus faible pour laisser voir le graphique en dessous.
-      ctx.fillStyle=heat(v)+(0.32*Math.min(1,v+0.3))+')';
+      var v=grid[r2*cols+c2]/maxV; if(v<0.06) continue;
+      // Opacité croissante avec l'intensité (plus regardé = plus opaque/visible).
+      var alpha = 0.20 + 0.55 * v;
+      ctx.fillStyle=heat(v)+alpha.toFixed(2)+')';
       ctx.fillRect(c2*cell,r2*cell,cell,cell);
     }
     // Scanpath : fixations de cette page (approximées via les points filtrés).
@@ -292,6 +317,6 @@
     });
   }
 
-  global.ResultsView = { show: show, hide: hide, analyze: analyze };
+  global.ResultsView = { show: show, hide: hide, analyze: analyze, showButton: showButton, hideButton: hideButton };
 
 })(typeof window !== 'undefined' ? window : global);

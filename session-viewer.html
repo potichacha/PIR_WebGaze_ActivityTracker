@@ -45,13 +45,37 @@
   </header>
 
   <div class="bar">
+    <span style="color:var(--muted);font-size:.82rem;">Filtrer :</span>
+    <select id="f-engine" class="ghost" style="padding:8px 10px;border-radius:8px;">
+      <option value="">Moteur : tous</option>
+      <option value="webgazer">WebGazer</option>
+      <option value="mediapipe">MediaPipe</option>
+    </select>
+    <select id="f-glasses" class="ghost" style="padding:8px 10px;border-radius:8px;">
+      <option value="">Lunettes : tous</option>
+      <option value="non">Sans lunettes</option>
+      <option value="lunettes">Lunettes</option>
+      <option value="lentilles">Lentilles</option>
+    </select>
     <span id="count" class="muted"></span>
     <span style="flex:1"></span>
-    <button id="btn-export" class="ghost">Exporter tout (.json)</button>
+    <button id="btn-cmp-sel" class="ghost" disabled>Comparer la sélection (0)</button>
+    <button id="btn-cmp-grp" class="ghost">Comparer WebGazer ↔ MediaPipe</button>
+    <button id="btn-export" class="ghost">Exporter tout</button>
     <label class="ghost" style="padding:9px 15px;border:1px solid rgba(120,140,200,.4);border-radius:8px;cursor:pointer;">
       Importer… <input id="imp" type="file" accept=".json" style="display:none;">
     </label>
     <button id="btn-clear" class="danger">Tout supprimer</button>
+  </div>
+
+  <!-- Overlay de comparaison -->
+  <div id="cmp-overlay" style="position:fixed;inset:0;z-index:100000;background:#0d1424;color:#eee;display:none;flex-direction:column;font-family:Arial,sans-serif;">
+    <div style="padding:14px 22px;border-bottom:1px solid rgba(120,140,200,.2);display:flex;align-items:center;gap:14px;">
+      <b style="color:#6c8cff;font-size:1.05rem;">Comparaison de sessions</b>
+      <span style="flex:1"></span>
+      <button id="cmp-close" style="background:#6c8cff;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;">Fermer ✕</button>
+    </div>
+    <div id="cmp-body" style="flex:1;overflow:auto;padding:22px;"></div>
   </div>
 
   <div class="wrap">
@@ -87,26 +111,68 @@
   <script src="src/linechart/linechart.js"></script>
   <script src="src/scatterchart/scatterchart.js"></script>
   <script src="src/results-view/results-view.js"></script>
+  <script src="src/compare/compare.js"></script>
 
   <script>
   (function () {
     'use strict';
     var _selId = null;
+    var _sortKey = 'start_time', _sortDir = -1; // tri courant
+    var _checked = {};                            // sessions cochées (id → true)
 
     function fmt(v, suffix){ return (v==null||v==='') ? '—' : (v + (suffix||'')); }
 
+    // Colonnes triables : clé de tri (dans summary) + libellé.
+    var COLS = [
+      { key:'start_time',     label:'Date' },
+      { key:'participant',    label:'Participant' },
+      { key:'glasses',        label:'Lunettes' },
+      { key:'engine',         label:'Moteur' },
+      { key:'calib_error_px', label:'Calib. (px)' },
+      { key:'lux',            label:'Lux' },
+      { key:'mean_confidence',label:'Conf.' },
+      { key:'n_points',       label:'Points' },
+      { key:'n_fixations',    label:'Fix' },
+      { key:'n_saccades',     label:'Sacc' },
+    ];
+
+    // Applique filtres + tri et renvoie la liste filtrée/triée.
+    function filteredRows() {
+      var fe = document.getElementById('f-engine').value;
+      var fg = document.getElementById('f-glasses').value;
+      var rows = SessionStore.list().filter(function (r) {
+        var s = r.summary;
+        if (fe && s.engine !== fe) return false;
+        if (fg && s.glasses !== fg) return false;
+        return true;
+      });
+      rows.sort(function (a, b) {
+        var va = a.summary[_sortKey], vb = b.summary[_sortKey];
+        if (va == null) va = (typeof vb === 'number') ? -Infinity : '';
+        if (vb == null) vb = (typeof va === 'number') ? -Infinity : '';
+        var cmp = (typeof va === 'number' && typeof vb === 'number')
+          ? (va - vb) : String(va).localeCompare(String(vb));
+        return cmp * _sortDir;
+      });
+      return rows;
+    }
+
     function renderList() {
-      var rows = SessionStore.list();
-      document.getElementById('count').textContent = rows.length + ' session(s) enregistrée(s)';
+      var rows = filteredRows();
+      var total = SessionStore.count();
+      document.getElementById('count').textContent = rows.length + ' / ' + total + ' session(s)';
       var el = document.getElementById('list');
-      if (!rows.length) { el.innerHTML = '<div class="empty">Aucune session. Lancez une <a href="test-session.html" style="color:#4ecdc4">session de test</a>.</div>'; return; }
-      var html = '<table><thead><tr>'
-        + '<th>Date</th><th>Participant</th><th>Lunettes</th><th>Moteur</th>'
-        + '<th>Calib. (px)</th><th>Lux</th><th>Conf.</th><th>Points</th><th>Fix</th><th>Sacc</th><th>AOI</th>'
-        + '</tr></thead><tbody>';
+      if (!total) { el.innerHTML = '<div class="empty">Aucune session. Lancez une <a href="index.html" style="color:#4ecdc4">session de test</a>.</div>'; return; }
+      if (!rows.length) { el.innerHTML = '<div class="empty">Aucune session ne correspond aux filtres.</div>'; return; }
+
+      var arrow = function (k) { return _sortKey===k ? (_sortDir<0?' ▼':' ▲') : ''; };
+      var html = '<table><thead><tr><th style="width:30px;"></th>';
+      COLS.forEach(function (c) { html += '<th data-sort="' + c.key + '" style="cursor:pointer;">' + c.label + arrow(c.key) + '</th>'; });
+      html += '</tr></thead><tbody>';
       rows.forEach(function (r) {
         var s = r.summary;
         html += '<tr class="row' + (r.id===_selId?' sel':'') + '" data-id="' + r.id + '">'
+          + '<td><input type="checkbox" class="cmp-cb" data-id="' + r.id + '"' + (_checked[r.id]?' checked':'') + '></td>'
           + '<td>' + fmt(s.date) + '</td>'
           + '<td>' + fmt(s.participant) + '</td>'
           + '<td>' + fmt(s.glasses) + '</td>'
@@ -117,14 +183,40 @@
           + '<td>' + fmt(s.n_points) + '</td>'
           + '<td>' + fmt(s.n_fixations) + '</td>'
           + '<td>' + fmt(s.n_saccades) + '</td>'
-          + '<td>' + fmt(s.n_aoi_hits) + '</td>'
           + '</tr>';
       });
       html += '</tbody></table>';
       el.innerHTML = html;
-      el.querySelectorAll('tr.row').forEach(function (tr) {
-        tr.addEventListener('click', function () { selectSession(tr.getAttribute('data-id')); });
+      // Tri au clic sur l'en-tête.
+      el.querySelectorAll('th[data-sort]').forEach(function (th) {
+        th.addEventListener('click', function () {
+          var k = th.getAttribute('data-sort');
+          if (_sortKey === k) _sortDir = -_sortDir; else { _sortKey = k; _sortDir = 1; }
+          renderList();
+        });
       });
+      // Clic sur une ligne = sélectionner (sauf sur la checkbox).
+      el.querySelectorAll('tr.row').forEach(function (tr) {
+        tr.addEventListener('click', function (e) {
+          if (e.target && e.target.classList.contains('cmp-cb')) return;
+          selectSession(tr.getAttribute('data-id'));
+        });
+      });
+      // Cases à cocher pour la comparaison.
+      el.querySelectorAll('.cmp-cb').forEach(function (cb) {
+        cb.addEventListener('change', function () {
+          var id = cb.getAttribute('data-id');
+          if (cb.checked) _checked[id] = true; else delete _checked[id];
+          _updateCompareBtn();
+        });
+      });
+    }
+
+    function _updateCompareBtn() {
+      var n = Object.keys(_checked).length;
+      var b = document.getElementById('btn-cmp-sel');
+      b.textContent = 'Comparer la sélection (' + n + ')';
+      b.disabled = (n !== 2);
     }
 
     function selectSession(id) {
@@ -243,7 +335,70 @@
     });
     document.getElementById('btn-del').addEventListener('click', function () {
       if (_selId && confirm('Supprimer cette session ?')) { SessionStore.delete(_selId); _selId=null;
-        document.getElementById('detail').classList.remove('on'); renderList(); }
+        delete _checked[_selId]; document.getElementById('detail').classList.remove('on'); renderList(); }
+    });
+
+    // ── Filtres ──
+    document.getElementById('f-engine').addEventListener('change', renderList);
+    document.getElementById('f-glasses').addEventListener('change', renderList);
+
+    // ── Comparaison : 2 sessions cochées ──
+    document.getElementById('btn-cmp-sel').addEventListener('click', function () {
+      var ids = Object.keys(_checked);
+      if (ids.length !== 2) return;
+      var a = SessionStore.get(ids[0]), b = SessionStore.get(ids[1]);
+      var sa = SessionStore.summarize(a), sb = SessionStore.summarize(b);
+      showCompare(Compare.compare(a, b, sa.participant + ' (' + (sa.engine||'?') + ')', sb.participant + ' (' + (sb.engine||'?') + ')'));
+    });
+
+    // ── Comparaison : groupe WebGazer ↔ groupe MediaPipe (sur les sessions filtrées) ──
+    document.getElementById('btn-cmp-grp').addEventListener('click', function () {
+      var rows = filteredRows();
+      var wg = rows.filter(function (r){ return r.summary.engine==='webgazer'; }).map(function (r){ return SessionStore.get(r.id); });
+      var mp = rows.filter(function (r){ return r.summary.engine==='mediapipe'; }).map(function (r){ return SessionStore.get(r.id); });
+      if (!wg.length || !mp.length) { alert('Il faut au moins une session WebGazer ET une MediaPipe (dans le filtre courant).'); return; }
+      showCompare(Compare.compare(wg, mp, 'WebGazer (' + wg.length + ')', 'MediaPipe (' + mp.length + ')'));
+    });
+
+    // Affiche le tableau de comparaison (propre et lisible).
+    function showCompare(cmp) {
+      var ov = document.getElementById('cmp-overlay');
+      var body = document.getElementById('cmp-body');
+      function cell(val, unit){ return (val==null) ? '—' : (val + (unit?(' '+unit):'')); }
+      var html = '<table style="width:100%;border-collapse:collapse;font-size:.92rem;">'
+        + '<thead><tr style="color:#4ecdc4;text-align:left;">'
+        + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">Métrique</th>'
+        + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">' + cmp.labelA + '</th>'
+        + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">' + cmp.labelB + '</th>'
+        + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">Différence (B−A)</th>'
+        + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">Meilleur</th>'
+        + '</tr></thead><tbody>';
+      cmp.rows.forEach(function (r) {
+        var aCol = r.better==='A' ? 'color:#27ae60;font-weight:700;' : '';
+        var bCol = r.better==='B' ? 'color:#27ae60;font-weight:700;' : '';
+        var betterTxt = r.better==='A' ? '◀ ' + cmp.labelA : r.better==='B' ? cmp.labelB + ' ▶' : (r.lowerBetter==null ? '(neutre)' : '=');
+        html += '<tr>'
+          + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);">' + r.label + (r.lowerBetter===true?' (↓ mieux)':r.lowerBetter===false?' (↑ mieux)':'') + '</td>'
+          + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);' + aCol + '">' + cell(r.a, r.unit) + '</td>'
+          + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);' + bCol + '">' + cell(r.b, r.unit) + '</td>'
+          + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);color:#9aa6c0;">' + (r.diff==null?'—':(r.diff>0?'+':'')+r.diff+(r.unit?(' '+r.unit):'')) + '</td>'
+          + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);">' + betterTxt + '</td>'
+          + '</tr>';
+      });
+      html += '</tbody></table>';
+      // Synthèse : qui gagne sur le plus de critères « qualité ».
+      var aWins = cmp.rows.filter(function(r){return r.better==='A';}).length;
+      var bWins = cmp.rows.filter(function(r){return r.better==='B';}).length;
+      var verdict = aWins===bWins ? 'Égalité sur les critères de qualité.'
+        : (aWins>bWins ? cmp.labelA + ' est meilleur (' + aWins + ' vs ' + bWins + ' critères)' : cmp.labelB + ' est meilleur (' + bWins + ' vs ' + aWins + ' critères)');
+      html += '<p style="margin-top:18px;font-size:1rem;font-weight:700;color:#6c8cff;">→ ' + verdict + '</p>'
+        + '<p style="color:#9aa6c0;font-size:.8rem;">Comparaison sur ' + cmp.nA + ' vs ' + cmp.nB + ' session(s). '
+        + 'Pour les groupes, chaque valeur est une moyenne.</p>';
+      body.innerHTML = html;
+      ov.style.display = 'flex';
+    }
+    document.getElementById('cmp-close').addEventListener('click', function () {
+      document.getElementById('cmp-overlay').style.display = 'none';
     });
 
     renderList();
