@@ -383,3 +383,6 @@ const BarChart = (function () {
     getState, setZoom, toggleQuarter, resetView, onStateChange,
   };
 })();
+
+// Exposition globale explicite (const top-level n'est PAS une propriété de window).
+if (typeof window !== 'undefined') window.BarChart = BarChart;

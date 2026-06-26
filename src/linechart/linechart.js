@@ -405,3 +405,5 @@ const LineChart = (function () {
 
   return { init, getAOIs, setGazeMode, gazeDwelling, gazeHover, gazeLeave, data: SERIES };
 })();
+
+if (typeof window !== 'undefined') window.LineChart = LineChart;
