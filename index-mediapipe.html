@@ -773,6 +773,7 @@
       try { GazeLogger.download(); } catch (_) {}
       setStatus('Test terminé — session enregistrée.', '#4ecdc4');
       ResultsView.show(data);
+      ResultsView.showButton(data); // bouton persistant pour rouvrir les résultats
     }
 
     // ── Dwell / AOI (porté de index.html, identique au moteur WebGazer) ──────────
