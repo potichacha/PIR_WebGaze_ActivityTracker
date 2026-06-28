@@ -150,9 +150,9 @@
       var rad = _clamp(6 + (f.d || 0) / 40, 7, 34);
       ctx.beginPath();
       ctx.arc(f.x, f.y, rad, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(78,205,196,0.30)';
+      ctx.fillStyle = 'rgba(59,130,246,0.20)';
       ctx.fill();
-      ctx.strokeStyle = '#4ecdc4';
+      ctx.strokeStyle = '#3B82F6';
       ctx.lineWidth = 2;
       ctx.stroke();
       ctx.fillStyle = '#fff';

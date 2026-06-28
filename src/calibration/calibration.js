@@ -352,14 +352,14 @@
     coords.style.cssText = `
       position: fixed; right: 20px; bottom: 20px; z-index: 10002;
       min-width: 190px; padding: 12px 16px; border-radius: 10px;
-      background: rgba(15,15,26,0.92); border: 1px solid rgba(78,205,196,0.45);
+      background: rgba(15,15,26,0.92); border: 1px solid rgba(59,130,246,0.45);
       color: #eee; font-size: 0.95rem; line-height: 1.4;
       box-shadow: 0 8px 24px rgba(0,0,0,0.28); pointer-events: none;
     `;
     coords.innerHTML = `
-      <div style="font-weight:bold;color:#4ecdc4;margin-bottom:4px;">Curseur WebGazer</div>
+      <div style="font-weight:bold;color:#3B82F6;margin-bottom:4px;">Curseur WebGazer</div>
       <div id="cal-point-coords-text">—</div>
-      <div id="cal-saccade-status" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(78,205,196,0.25);color:#95a5a6;">Saccades: —</div>
+      <div id="cal-saccade-status" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(59,130,246,0.25);color:#9CA3AF;">Saccades: —</div>
     `;
     document.body.appendChild(coords);
   }
@@ -384,10 +384,10 @@
     const el = typeof document !== 'undefined' && document.getElementById('cal-saccade-status');
     if (el) {
       let text = 'non';
-      let color = '#95a5a6';
+      let color = '#9CA3AF';
       if (isSaccade) {
         text = 'oui';
-        color = '#e74c3c';
+        color = '#9CA3AF';
       }
       el.style.color = color;
       el.textContent = `Saccades: ${text}`;
@@ -684,15 +684,15 @@
     if (!panel) return;
     const rows = debugEvents.slice(-8).map(e => {
       let levelColor = '#ddd';
-      if (e.level === 'error') levelColor = '#e74c3c';
-      else if (e.level === 'warn') levelColor = '#f39c12';
+      if (e.level === 'error') levelColor = '#9CA3AF';
+      else if (e.level === 'warn') levelColor = '#9CA3AF';
       return `<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
-        <span style="color:#4ecdc4;">${e.ts.slice(11, 19)}</span>
+        <span style="color:#3B82F6;">${e.ts.slice(11, 19)}</span>
         <span style="color:${levelColor};">${e.message}</span>
       </div>`;
     }).join('');
     panel.innerHTML = `
-      <div style="font-weight:bold;color:#4ecdc4;margin-bottom:4px;">Calibration debug ${CONFIG.VERSION}</div>
+      <div style="font-weight:bold;color:#3B82F6;margin-bottom:4px;">Calibration debug ${CONFIG.VERSION}</div>
       <div>pred: ${predictionStats.syncValid}/${predictionStats.calls} valid, promises ${predictionStats.promiseResolved}/${predictionStats.promises}, err ${predictionStats.errors}</div>
       ${rows}
     `;
@@ -706,7 +706,7 @@
     panel.style.cssText = `
       position: fixed; left: 12px; bottom: 12px; z-index: 100005;
       max-width: 480px; padding: 10px 12px; border-radius: 8px;
-      background: rgba(7,12,28,0.92); border: 1px solid rgba(78,205,196,0.45);
+      background: rgba(7,12,28,0.92); border: 1px solid rgba(59,130,246,0.45);
       color: #ddd; font: 12px/1.45 Consolas, monospace; pointer-events: none;
       box-shadow: 0 8px 24px rgba(0,0,0,0.28);
     `;
@@ -1084,8 +1084,8 @@
       width: 160px;
       border-radius: 12px;
       overflow: hidden;
-      border: 2px solid #4ecdc4;
-      background: #0d1b2a;
+      border: 2px solid #3B82F6;
+      background: #000;
       pointer-events: none;
       transition: left 0.4s ease, bottom 0.4s ease, right 0.4s ease;
     `;
@@ -1106,7 +1106,7 @@
       position: absolute; top: 50%; left: 50%;
       transform: translate(-50%, -50%);
       width: 60px; height: 80px; border-radius: 50%;
-      border: 2px dashed #e74c3c;
+      border: 2px dashed #9CA3AF;
       pointer-events: none;
       transition: border-color 0.3s;
     `;
@@ -1116,7 +1116,7 @@
     lbl.id = 'cal-mirror-live-lbl';
     lbl.style.cssText = `
       position: absolute; bottom: 4px; left: 0; right: 0;
-      text-align: center; font-size: 0.65rem; color: #e74c3c;
+      text-align: center; font-size: 0.65rem; color: #9CA3AF;
       pointer-events: none;
     `;
     lbl.textContent = 'Distance ?';
@@ -1148,8 +1148,8 @@
             }
             const lum = t / (cw * ch);
             const ok = lum >= DIST_BRIGHT_MIN && lum <= DIST_BRIGHT_MAX;
-            let mirrorColor = '#e74c3c';
-            if (ok) mirrorColor = '#27ae60';
+            let mirrorColor = '#9CA3AF';
+            if (ok) mirrorColor = '#3B82F6';
             oval.style.borderColor = mirrorColor;
             lbl.style.color = mirrorColor;
             let distanceLabel = '↔ Éloignez-vous';
@@ -1227,7 +1227,7 @@
     form.style.cssText = `
       position: absolute; top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      background: #16213e; border-radius: 16px;
+      background: #0d0d0d; border-radius: 16px;
       padding: 32px 40px; max-width: 520px; width: 90%;
       color: #eee; font-family: Arial, sans-serif;
       overflow-y: auto; max-height: 80vh;
@@ -1236,8 +1236,8 @@
     const fieldStyle = 'margin-bottom:16px;';
     const labelStyle = 'display:block;font-size:0.85rem;color:#aaa;margin-bottom:6px;';
     const inputStyle = `
-      width:100%; background:#0d1b2a; border:1px solid #2c3e50;
-      border-radius:8px; color:#eee; font-size:0.9rem;
+      width:100%; background:#000; border:1px solid #1F2937;
+      border-radius:8px; color:#F0F0F0; font-size:0.9rem;
       padding:9px 12px; outline:none; box-sizing:border-box;
     `;
     const radioGroupStyle = 'display:flex;gap:14px;flex-wrap:wrap;margin-top:4px;';
@@ -1254,15 +1254,15 @@
       return `<div style="${radioGroupStyle}">${options.map(o =>
         `<label style="${radioLabelStyle}">
           <input type="radio" name="${name}" value="${o.v}"
-            style="accent-color:#4ecdc4;width:15px;height:15px;" />
+            style="accent-color:#3B82F6;width:15px;height:15px;" />
           ${o.l}
         </label>`
       ).join('')}</div>`;
     }
 
     form.innerHTML = `
-      <h3 style="margin:0 0 20px;color:#4ecdc4;font-size:1.1rem;">Session de test — Données participant</h3>
-      ${field('ID participant <span style="color:#e74c3c">*</span>',
+      <h3 style="margin:0 0 20px;color:#3B82F6;font-size:1.1rem;">Session de test — Données participant</h3>
+      ${field('ID participant <span style="color:#9CA3AF">*</span>',
         `<input type="text" id="q-pid" placeholder="P01, P02…" style="${inputStyle}" />`)}
       ${field('Âge',
         `<input type="number" id="q-age" min="16" max="80" placeholder="—" style="${inputStyle}" />`)}
@@ -1282,10 +1282,10 @@
         {v:'sombre',l:'Sombre'},{v:'normal',l:'Normal'},
         {v:'lumineux',l:'Lumineux'},{v:'contre-jour',l:'Contre-jour'}
       ]))}
-      <div id="q-error" style="color:#e74c3c;font-size:0.85rem;margin-bottom:12px;display:none;">
+      <div id="q-error" style="color:#9CA3AF;font-size:0.85rem;margin-bottom:12px;display:none;">
         L'ID participant est obligatoire.
       </div>
-      <button id="q-submit" style="${_btnStyle('#4ecdc4')}color:#0f0f1a;font-weight:bold;width:100%;margin:0;">
+      <button id="q-submit" style="${_btnStyle('#3B82F6')}color:#000;font-weight:bold;width:100%;margin:0;">
         Continuer vers la calibration →
       </button>
     `;
@@ -1351,7 +1351,7 @@
     video.style.cssText = `
       width: 320px; height: 240px;
       border-radius: 12px;
-      border: 3px solid #4ecdc4;
+      border: 3px solid #3B82F6;
       transform: scaleX(-1);
       display: block;
     `;
@@ -1366,10 +1366,10 @@
       transform: translate(-50%, -50%);
       width: 120px; height: 160px;
       border-radius: 50%;
-      border: 3px dashed #e74c3c;
+      border: 3px dashed #9CA3AF;
       pointer-events: none;
       transition: border-color 0.3s, box-shadow 0.3s;
-      box-shadow: 0 0 0 0 rgba(231,76,60,0);
+      box-shadow: 0 0 0 0 rgba(59,130,246,0);
     `;
 
     // Label sous l'ovale
@@ -1378,7 +1378,7 @@
     ovalLabel.style.cssText = `
       position: absolute; bottom: -24px; left: 50%;
       transform: translateX(-50%);
-      font-size: 0.75rem; color: #e74c3c;
+      font-size: 0.75rem; color: #9CA3AF;
       white-space: nowrap; pointer-events: none;
     `;
     ovalLabel.textContent = 'Alignez votre visage ici';
@@ -1394,7 +1394,7 @@
 
     const statusBox = document.createElement('div');
     statusBox.style.cssText = `
-      background: #16213e; border-radius: 10px;
+      background: #0d0d0d; border-radius: 10px;
       padding: 12px 20px; margin-bottom: 16px;
       font-size: 0.88rem; line-height: 1.9;
       min-width: 320px;
@@ -1402,7 +1402,7 @@
 
     const btnReady = document.createElement('button');
     btnReady.textContent = 'Je suis prêt — Démarrer la calibration';
-    btnReady.style.cssText = _btnStyle('#4ecdc4') + 'color:#0f0f1a;font-weight:bold;';
+    btnReady.style.cssText = _btnStyle('#3B82F6') + 'color:#000;font-weight:bold;';
     // Désactivé tant que la distance n'est pas validée
     btnReady.disabled = true;
     btnReady.style.opacity = '0.45';
@@ -1414,22 +1414,23 @@
     overlay.appendChild(container);
 
     let stream       = null;
-    let luminanceOk  = false;
-    let lightBalanceOk = false;
-    let distanceOk   = false;
+    let luminanceOk      = false;
+    let lightBalanceOk   = false;
+    let distanceOk       = false;
+    let distanceForcedOk = false;
 
     // Seuils de luminance du centre du visage pour estimer la distance.
-    // Quand le visage est trop proche le centre sature (luminance centrale élevée),
-    // trop loin il est foncé. On utilise la zone centrale 30% comme proxy.
-    const DIST_BRIGHT_MIN = 80;   // trop sombre → trop loin ou mal éclairé
-    const DIST_BRIGHT_MAX = 210;  // trop brillant → trop près
+    // Proxy peu fiable (dépend du teint/éclairage) — seuils larges pour éviter
+    // les faux positifs ; un timeout de 8 s débloque le bouton en fallback.
+    const DIST_BRIGHT_MIN = 35;   // trop sombre → trop loin ou mal éclairé
+    const DIST_BRIGHT_MAX = 240;  // trop brillant → trop près
 
     function updateOval(ok) {
-      let color = '#e74c3c';
-      let shadow = '0 0 0 0 rgba(231,76,60,0)';
+      let color = '#9CA3AF';
+      let shadow = '0 0 0 0 rgba(59,130,246,0)';
       let labelText = 'Alignez votre visage ici';
       if (ok) {
-        color = '#27ae60';
+        color = '#3B82F6';
         shadow = '0 0 12px 4px rgba(39,174,96,0.45)';
         labelText = '✓ Distance correcte';
       }
@@ -1451,13 +1452,13 @@
       let lumMsg, lumColor;
       if (lum < CONFIG.LUMINANCE_MIN) {
         lumMsg = '⚠️ Trop sombre — allumez une lumière devant vous';
-        lumColor = '#e74c3c'; luminanceOk = false;
+        lumColor = '#9CA3AF'; luminanceOk = false;
       } else if (lum > CONFIG.LUMINANCE_MAX) {
         lumMsg = '⚠️ Trop lumineux — évitez la lumière directe dans le dos';
         lumColor = '#e67e22'; luminanceOk = false;
       } else {
         lumMsg = '✓ Luminosité correcte';
-        lumColor = '#27ae60'; luminanceOk = true;
+        lumColor = '#3B82F6'; luminanceOk = true;
       }
 
       let balanceMsg, balanceColor;
@@ -1466,12 +1467,15 @@
         balanceColor = '#e67e22'; lightBalanceOk = false;
       } else {
         balanceMsg = '✓ Lumière équilibrée sur le visage';
-        balanceColor = '#27ae60'; lightBalanceOk = true;
+        balanceColor = '#3B82F6'; lightBalanceOk = true;
       }
 
       // Estimation distance via luminance centrale
       let distMsg, distColor;
-      if (centerLum < DIST_BRIGHT_MIN) {
+      if (distanceForcedOk) {
+        distMsg = '✓ Distance acceptée';
+        distColor = '#3B82F6'; distanceOk = true;
+      } else if (centerLum < DIST_BRIGHT_MIN) {
         distMsg = '↔️ Rapprochez-vous de l\'écran (~60 cm)';
         distColor = '#e67e22'; distanceOk = false;
       } else if (centerLum > DIST_BRIGHT_MAX) {
@@ -1479,7 +1483,7 @@
         distColor = '#e67e22'; distanceOk = false;
       } else {
         distMsg = '✓ Distance correcte (~60 cm)';
-        distColor = '#27ae60'; distanceOk = true;
+        distColor = '#3B82F6'; distanceOk = true;
       }
 
       updateOval(distanceOk);
@@ -1540,6 +1544,17 @@
           } catch (_) {}
         }, 600);
         video._lumInterval = lumInterval;
+
+        // Fallback : si la détection distance n'a pas validé après 8 s, débloquer
+        setTimeout(() => {
+          if (!distanceOk) {
+            distanceForcedOk = true;
+            distanceOk = true;
+            checkReadiness();
+            updateOval(true);
+          }
+        }, 8000);
+
       }).catch(() => {
         statusBox.innerHTML = '<div style="color:#e67e22">⚠️ Miroir webcam non disponible — continuez manuellement</div>';
         luminanceOk = true; lightBalanceOk = true; distanceOk = true; checkReadiness();
@@ -1615,7 +1630,7 @@
       const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
       circle.setAttribute('cx', '20'); circle.setAttribute('cy', '20'); circle.setAttribute('r', '15');
       circle.setAttribute('fill', 'none');
-      circle.setAttribute('stroke', '#4ecdc4');
+      circle.setAttribute('stroke', '#3B82F6');
       circle.setAttribute('stroke-width', '3');
       circle.setAttribute('stroke-dasharray', '100');
       circle.setAttribute('stroke-dashoffset', '100');
@@ -1627,7 +1642,7 @@
         position: absolute;
         width: 28px; height: 28px;
         border-radius: 50%;
-        background: #e74c3c;
+        background: #9CA3AF;
         border: 3px solid #fff;
         left: 6px; top: 6px;
         cursor: pointer;
@@ -1693,7 +1708,7 @@
         setTimeout(() => { point.style.transform = ''; }, 150);
 
         if (clicksOnPoint >= CONFIG.CLICKS_PER_POINT) {
-          point.style.background = '#27ae60';
+          point.style.background = '#3B82F6';
           point.style.pointerEvents = 'none';
           wrapper.removeEventListener('click', handleClick);
           setTimeout(() => {
@@ -1739,7 +1754,7 @@
     `;
     box.innerHTML = `
       <div style="font-size:3rem;margin-bottom:16px;">${color}</div>
-      <h2 style="font-size:1.5rem;margin-bottom:10px;color:#4ecdc4;">${title}</h2>
+      <h2 style="font-size:1.5rem;margin-bottom:10px;color:#3B82F6;">${title}</h2>
       <p style="font-size:0.95rem;color:#aaa;max-width:420px;line-height:1.7;">${subtitle}</p>
       <p style="margin-top:24px;font-size:0.8rem;color:#666;">Démarrage dans ${Math.round(delayMs / 1000)}s…</p>
     `;
@@ -1761,7 +1776,7 @@
     progressBar.style.cssText = `
       position: absolute; top: 0; left: 0;
       height: 4px; width: 0%;
-      background: #4ecdc4;
+      background: #3B82F6;
       transition: width 0.3s ease;
       z-index: 2;
     `;
@@ -1800,7 +1815,7 @@
       width:  ${CONFIG.ANIMATED_BALL_RADIUS * 2}px;
       height: ${CONFIG.ANIMATED_BALL_RADIUS * 2}px;
       border-radius: 50%;
-      background: radial-gradient(circle at 35% 35%, #6ee7e0, #4ecdc4 60%, #1a9e97);
+      background: #3B82F6;
       box-shadow: 0 0 18px 6px rgba(78,205,196,0.55);
       pointer-events: none;
       z-index: 3;
@@ -1823,13 +1838,13 @@
     const ringBg = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     ringBg.setAttribute('cx', String(R + 3)); ringBg.setAttribute('cy', String(R + 3));
     ringBg.setAttribute('r', String(R));
-    ringBg.setAttribute('fill', 'none'); ringBg.setAttribute('stroke', '#2c3e50');
+    ringBg.setAttribute('fill', 'none'); ringBg.setAttribute('stroke', '#1F2937');
     ringBg.setAttribute('stroke-width', '3');
     const ring = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
     const circ = +(2 * Math.PI * R).toFixed(2);
     ring.setAttribute('cx', String(R + 3)); ring.setAttribute('cy', String(R + 3));
     ring.setAttribute('r', String(R));
-    ring.setAttribute('fill', 'none'); ring.setAttribute('stroke', '#4ecdc4');
+    ring.setAttribute('fill', 'none'); ring.setAttribute('stroke', '#3B82F6');
     ring.setAttribute('stroke-width', '3');
     ring.setAttribute('stroke-dasharray', String(circ));
     ring.setAttribute('stroke-dashoffset', String(circ));
@@ -2158,7 +2173,7 @@
       dot.type = 'button';
       dot.style.cssText = `
         width:36px;height:36px;border-radius:50%;border:3px solid #fff;
-        background:#4ecdc4;color:#0f0f1a;font-weight:bold;cursor:pointer;
+        background:#3B82F6;color:#000;font-weight:bold;cursor:pointer;
         box-shadow:0 0 16px rgba(78,205,196,0.55);
       `;
       dot.textContent = `0/${CONFIG.MICRO_RECALIBRATION_CLICKS}`;
@@ -2582,14 +2597,14 @@
 
     const btnBack = document.createElement('button');
     btnBack.textContent = 'Retour aux résultats';
-    btnBack.style.cssText = _btnStyle('#4ecdc4') + 'position:absolute;right:24px;bottom:24px;color:#0f0f1a;font-weight:bold;';
+    btnBack.style.cssText = _btnStyle('#3B82F6') + 'position:absolute;right:24px;bottom:24px;color:#000;font-weight:bold;';
     btnBack.addEventListener('click', () => showScore(score));
     overlay.appendChild(btnBack);
   }
 
   function redGreen(isBad) {
-    if (isBad) return '#e74c3c';
-    return '#27ae60';
+    if (isBad) return '#9CA3AF';
+    return '#3B82F6';
   }
 
   function showScore(score) {
@@ -2605,10 +2620,10 @@
       quality.lowSampleRate;
     const isLimit = !needsRecal && score.meanError > CONFIG.RECALIBRATION_THRESHOLD * 0.7;
 
-    let color = '#27ae60';
+    let color = '#3B82F6';
     let verdict = 'Calibration réussie ✓';
     if (needsRecal) {
-      color = '#e74c3c';
+      color = '#9CA3AF';
       verdict = 'Calibration insuffisante';
     } else if (isLimit) {
       color = '#e67e22';
@@ -2627,7 +2642,7 @@
     container.style.cssText = `
       position: absolute; top: 50%; left: 50%;
       transform: translate(-50%, -50%);
-      background: #16213e; border: 2px solid ${color};
+      background: #0d0d0d; border: 2px solid ${color};
       border-radius: 16px; padding: 36px 52px;
       text-align: center; color: #eee; min-width: 420px; max-width: 560px;
     `;
@@ -2636,7 +2651,7 @@
     let qRows = '';
     if (score.quadrantErrors) {
       qRows = Object.entries(score.quadrantErrors).map(([q, err]) => {
-        let c = '#888';
+        let c = '#374151';
         let errText = '—';
         if (err !== null) {
           c = redGreen(err > CONFIG.ADAPTIVE_THRESHOLD);
@@ -2709,7 +2724,7 @@
         </tr>
         ${looRow}
         ${qualityRows}
-        <tr><td colspan="2" style="padding:6px 14px;color:#4ecdc4;font-size:.8rem;text-align:left;">— Précision par quadrant —</td></tr>
+        <tr><td colspan="2" style="padding:6px 14px;color:#3B82F6;font-size:.8rem;text-align:left;">— Précision par quadrant —</td></tr>
         ${qRows}
         ${driftRow}
         <tr>
@@ -2729,7 +2744,7 @@
     // Bouton Continuer — toujours visible
     const btnOk = document.createElement('button');
     let okText = 'Continuer →';
-    let okColor = '#27ae60';
+    let okColor = '#3B82F6';
     if (needsRecal) {
       okText = 'Continuer quand même →';
       okColor = '#7f8c8d';
@@ -2782,7 +2797,7 @@
     let recalColor = '#7f8c8d';
     if (needsRecal) {
       recalText = 'Recalibrer complètement';
-      recalColor = '#e74c3c';
+      recalColor = '#9CA3AF';
     }
     btnRecal.textContent = recalText;
     btnRecal.style.cssText = _btnStyle(recalColor);

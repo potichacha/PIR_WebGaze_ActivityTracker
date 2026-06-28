@@ -199,7 +199,7 @@ const ScatterChart = (function () {
       })
       .attr('stroke', function (d) {
         if (d.id === id) {
-          return '#f39c12';
+          return '#3B82F6';
         }
         return '#fff';
       });

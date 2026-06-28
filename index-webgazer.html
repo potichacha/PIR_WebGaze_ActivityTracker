@@ -36,10 +36,21 @@
 
   <style>
     :root {
-      --bg: #0f0f1a; --panel: #16213e; --accent: #4ecdc4;
-      --text: #eee; --muted: #9aa6c0;
+      --bg:      #000;
+      --surface: #0d0d0d;
+      --accent:  #3B82F6;
+      --text:    #F0F0F0;
+      --muted:   #9CA3AF;
+      --border:  #1F2937;
     }
-    * { box-sizing: border-box; }
+    *, *::before, *::after { box-sizing: border-box; }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
+
     body {
       margin: 0; background: var(--bg); color: var(--text);
       font-family: 'Segoe UI', Arial, sans-serif;
@@ -49,123 +60,140 @@
 
     header {
       padding: 14px 22px; display: flex; align-items: center; gap: 16px;
-      border-bottom: 1px solid rgba(78,205,196,.18);
+      border-bottom: 1px solid var(--border);
     }
-    header h1 { font-size: 1.1rem; margin: 0; }
+    header h1 { font-size: 1.1rem; margin: 0; font-weight: 700; }
     .engine-badge {
-      font-size: .75rem; background: rgba(78,205,196,.15); color: var(--accent);
+      font-size: .75rem;
+      background: rgba(59,130,246,.1);
+      border: 1px solid rgba(59,130,246,.25);
+      color: var(--accent);
       padding: 3px 10px; border-radius: 999px; font-weight: 700;
     }
-    header a { margin-left: auto; color: var(--muted); font-size: .85rem; text-decoration: none; }
-    header a:hover { color: var(--accent); }
+    header a {
+      margin-left: auto; color: var(--muted);
+      font-size: .85rem; text-decoration: none;
+    }
+    header a:hover { color: var(--text); }
 
+    /* ── Barre d'actions ────────────────────────────────────────────────────── */
     .bar {
       display: flex; gap: 10px; align-items: center; padding: 12px 22px;
-      flex-wrap: wrap; border-bottom: 1px solid rgba(78,205,196,.12);
+      flex-wrap: wrap; border-bottom: 1px solid var(--border);
     }
     button {
-      background: var(--accent); color: #0f0f1a; border: none; border-radius: 8px;
+      background: var(--accent); color: #000; border: none; border-radius: 8px;
       padding: 9px 16px; font-size: .9rem; cursor: pointer; font-weight: 700;
       font-family: inherit; transition: opacity .15s;
     }
-    button:hover { opacity: .85; }
+    button:hover:not(:disabled) { opacity: .88; }
     button.ghost {
-      background: transparent; border: 1px solid rgba(78,205,196,.4); color: var(--text);
+      background: transparent; border: 1px solid var(--border); color: var(--text);
     }
-    button:disabled { opacity: .4; cursor: not-allowed; }
+    button:disabled { opacity: .35; cursor: not-allowed; }
     #status { font-size: .85rem; color: var(--muted); margin-left: 8px; }
 
+    /* ── Navigation graphiques ──────────────────────────────────────────────── */
     #demo-nav { display: flex; gap: 8px; padding: 14px 22px 0; }
     #demo-nav button {
-      background: transparent; border: 1px solid rgba(78,205,196,.3);
+      background: transparent; border: 1px solid var(--border);
       color: var(--muted); font-weight: 600;
     }
-    #demo-nav button.active { background: var(--accent); color: #0f0f1a; border-color: transparent; }
-    #demo-nav button:hover:not(.active) { color: var(--accent); }
+    #demo-nav button.active {
+      background: var(--accent); color: #000; border-color: transparent;
+    }
+    #demo-nav button:hover:not(.active) { color: var(--text); border-color: var(--accent); }
 
     .chart-area { padding: 18px 22px; min-height: 60vh; }
-    .tab-panel { display: none; } .tab-panel.active { display: block; }
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
 
+    /* ── Curseur regard ─────────────────────────────────────────────────────── */
     #gaze-cursor {
-      position: fixed; width: 24px; height: 24px; border-radius: 50%;
-      border: 2px solid var(--accent); background: rgba(78,205,196,.15);
+      position: fixed; width: 22px; height: 22px; border-radius: 50%;
+      border: 2px solid var(--accent); background: rgba(59,130,246,.12);
       transform: translate(-50%,-50%); pointer-events: none; z-index: 9000; display: none;
     }
 
+    /* ── Widget retour environnement ────────────────────────────────────────── */
     #face-widget {
       position: fixed; bottom: 14px; right: 14px; z-index: 9600; width: 200px;
-      background: rgba(15,15,26,.92); border: 1px solid rgba(78,205,196,.35);
-      border-radius: 12px; padding: 10px 12px; font-size: .78rem; color: #ddd;
+      background: #0d0d0d; border: 1px solid var(--border);
+      border-radius: 10px; padding: 10px 12px; font-size: .78rem; color: var(--text);
     }
     #face-widget .fw-row { display: flex; justify-content: space-between; margin: 3px 0; }
     #face-widget .fw-dot {
-      width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 5px;
-      background: #888;
+      width: 9px; height: 9px; border-radius: 50%;
+      display: inline-block; margin-right: 6px; background: #374151;
     }
     #face-widget .fw-title {
-      font-weight: bold; color: var(--accent); margin-bottom: 5px;
+      font-weight: 700; color: var(--muted); margin-bottom: 6px;
+      font-size: .72rem; text-transform: uppercase; letter-spacing: .04em;
     }
 
-    /* WebGazer force son conteneur vidéo — on le place en bas-gauche pour ne pas
-       masquer le widget retour visage (bas-droite). */
+    /* ── Vidéo WebGazer ─────────────────────────────────────────────────────── */
     #webgazerVideoContainer {
       position: fixed !important;
       bottom: 14px !important; left: 14px !important;
       top: auto !important; right: auto !important;
       width: 160px !important; height: 120px !important;
       border-radius: 8px; overflow: hidden;
-      border: 2px solid rgba(78,205,196,.45);
-      box-shadow: 0 2px 16px rgba(0,0,0,.5); z-index: 9100;
+      border: 1px solid var(--border);
+      z-index: 9100;
     }
     #webgazerVideoFeed { width: 160px !important; height: 120px !important; }
     #webgazerFaceOverlay, #webgazerFaceFeedbackBox {
       width: 160px !important; height: 120px !important;
     }
 
-    /* ── Dialogue de positionnement ─────────────────────────────────────────── */
+    /* ── Positionnement ─────────────────────────────────────────────────────── */
     .wg-modal-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,.82); z-index: 9999;
+      position: fixed; inset: 0; background: rgba(0,0,0,.88); z-index: 9999;
       display: flex; flex-direction: column; align-items: center;
-      justify-content: center; font-family: inherit; gap: 18px;
+      justify-content: center; font-family: inherit; gap: 16px;
     }
-    .wg-pos-title { margin: 0 0 4px; color: #4ecdc4; font-size: 1.1rem; text-align: center; }
-    .wg-pos-hint  { color: #9aa6c0; margin: 0 0 14px; line-height: 1.65; font-size: .88rem;
-                    text-align: center; max-width: 380px; }
-    /* Wrapper du retour vidéo WebGazer agrandi centré */
-    .wg-pos-video-wrap {
-      position: relative; width: 320px; height: 240px;
+    .wg-pos-title {
+      margin: 0; color: var(--text); font-size: 1.1rem;
+      font-weight: 700; text-align: center;
     }
-    /* Ovale guide par-dessus la vidéo */
+    .wg-pos-hint {
+      color: var(--muted); margin: 0; line-height: 1.65; font-size: .88rem;
+      text-align: center; max-width: 360px;
+    }
+    .wg-pos-video-wrap { position: relative; width: 320px; height: 240px; }
     .wg-pos-oval {
       position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
       width: 130px; height: 170px; border-radius: 50%;
-      border: 3px dashed #e74c3c; pointer-events: none;
+      border: 2px dashed #374151; pointer-events: none;
       transition: border-color .3s, box-shadow .3s;
     }
     .wg-pos-btn {
-      background: #4ecdc4; color: #0f0f1a; border: none;
+      background: var(--accent); color: #000; border: none;
       border-radius: 8px; padding: 12px 26px; font-weight: 700;
       cursor: pointer; font-size: .95rem; font-family: inherit;
     }
-    /* ── Vérification libre avant test ──────────────────────────────────────── */
+
+    /* ── Vérification libre ─────────────────────────────────────────────────── */
     .wg-freelook-box {
       position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
-      z-index: 10006; background: rgba(15,15,26,.92);
-      border: 1px solid rgba(78,205,196,.5); border-radius: 12px;
-      padding: 14px 22px; color: #eee; text-align: center;
+      z-index: 10006; background: #0d0d0d;
+      border: 1px solid var(--border); border-radius: 10px;
+      padding: 14px 22px; color: var(--text); text-align: center;
       font-size: .9rem; line-height: 1.7; font-family: inherit;
     }
-    .wg-freelook-title  { color: #4ecdc4; font-weight: bold; margin-bottom: 5px; }
-    .wg-freelook-accent { color: #4ecdc4; }
+    .wg-freelook-title  { color: var(--text); font-weight: 700; margin-bottom: 5px; }
+    .wg-freelook-accent { color: var(--accent); }
     .wg-freelook-ok {
-      margin-top: 10px; background: #4ecdc4; color: #0f0f1a; border: none;
-      border-radius: 8px; padding: 9px 18px; font-weight: 700; cursor: pointer; font-family: inherit;
+      margin-top: 10px; background: var(--accent); color: #000; border: none;
+      border-radius: 8px; padding: 9px 18px; font-weight: 700;
+      cursor: pointer; font-family: inherit;
     }
     .wg-freelook-recal {
-      margin-top: 10px; background: transparent; color: #e0a96a;
-      border: 1px solid rgba(224,169,106,.5); border-radius: 8px;
+      margin-top: 10px; background: transparent; color: var(--muted);
+      border: 1px solid var(--border); border-radius: 8px;
       padding: 9px 18px; cursor: pointer; font-family: inherit;
     }
+    .wg-freelook-recal:hover { color: var(--text); border-color: var(--accent); }
   </style>
 </head>
 <body>
@@ -272,7 +300,7 @@
 
   function setStatus(txt, color) {
     statusEl.textContent = txt;
-    statusEl.style.color = color || '#9aa6c0';
+    statusEl.style.color = color || '#9CA3AF';
   }
 
   // ── Graphiques ───────────────────────────────────────────────────────────────
@@ -301,18 +329,18 @@
     document.getElementById('fw-cam').textContent =
       !_wgStarted ? 'inactive' : gazeRecent ? 'suivi actif' : 'caméra active';
     document.getElementById('fw-cam-dot').style.background =
-      !_wgStarted ? '#888' : gazeRecent ? '#27ae60' : '#4ecdc4';
+      !_wgStarted ? '#374151' : gazeRecent ? '#3B82F6' : '#60A5FA';
     var lux = AmbientLight.getLux();
     var luxOk = lux != null && lux >= 80 && lux <= 700;
     document.getElementById('fw-lux').textContent = lux != null ? lux + ' lux' : '—';
-    document.getElementById('fw-lux-dot').style.background = lux == null ? '#888' : luxOk ? '#27ae60' : '#e0a96a';
+    document.getElementById('fw-lux-dot').style.background = lux == null ? '#374151' : luxOk ? '#3B82F6' : '#9CA3AF';
   }, 800);
 
   // ── Calibrer ─────────────────────────────────────────────────────────────────
   document.getElementById('btn-calibrate').addEventListener('click', function () {
     var _lux = (window.AmbientLight && typeof AmbientLight.getLux === 'function') ? AmbientLight.getLux() : null;
     ParticipantForm.show({
-      accentColor: '#4ecdc4',
+      accentColor: '#3B82F6',
       engine: 'webgazer',
       lux: _lux,
       onDone: function (sessionData) {
@@ -324,7 +352,7 @@
 
   async function _startEngineThenCalibrate() {
     if (!_wgStarted) {
-      setStatus('Démarrage de la caméra WebGazer…', '#e0a96a');
+      setStatus('Démarrage de la caméra WebGazer…', '#9CA3AF');
       try {
         webgazer.saveDataAcrossSessions(false);
         webgazer.showVideo(true).showFaceOverlay(true).showFaceFeedbackBox(true);
@@ -334,7 +362,7 @@
         _wgStarted = true;
         AmbientLight.start();
       } catch (err) {
-        setStatus('Erreur caméra : ' + (err.message || String(err)), '#e74c3c');
+        setStatus('Erreur caméra : ' + (err.message || String(err)), '#F0F0F0');
         return;
       }
     }
@@ -352,8 +380,7 @@
         'position:fixed !important; width:320px !important; height:240px !important;'
         + 'left:50% !important; top:50% !important; bottom:auto !important; right:auto !important;'
         + 'transform:translate(-50%,-50%) !important;'
-        + 'border-radius:12px; border:3px solid #4ecdc4;'
-        + 'box-shadow:0 0 40px rgba(78,205,196,.25); z-index:10000;';
+        + 'border-radius:8px; border:1px solid #1F2937; z-index:10000;';
       // Agrandir aussi le feed vidéo interne
       ['webgazerVideoFeed','webgazerFaceOverlay','webgazerFaceFeedbackBox'].forEach(function (id) {
         var el = document.getElementById(id);
@@ -395,8 +422,8 @@
     // Colorer l'ovale selon la détection WebGazer
     var _ovalIv = setInterval(function () {
       var gazeRecent = _gazeOn && (Date.now() - _gazeLastMs < 1500);
-      oval.style.borderColor = gazeRecent ? '#27ae60' : '#e74c3c';
-      oval.style.boxShadow   = gazeRecent ? '0 0 14px 4px rgba(39,174,96,.45)' : '';
+      oval.style.borderColor = gazeRecent ? '#3B82F6' : '#374151';
+      oval.style.boxShadow   = gazeRecent ? '0 0 12px 4px rgba(59,130,246,.4)' : '';
     }, 400);
 
     goBtn.addEventListener('click', function () {
@@ -420,13 +447,26 @@
 
   // ── Calibration ──────────────────────────────────────────────────────────────
   function _runCalibration() {
-    setStatus('Calibration en cours — suivez les instructions à l\'écran…', '#4ecdc4');
+    // Pré-remplir sessionStorage pour que calibration.js saute son propre formulaire
+    if (_session) {
+      try {
+        sessionStorage.setItem('calibration_session', JSON.stringify({
+          participant_id:    _session.participant_id,
+          date:              _session.date,
+          glasses:           _session.glasses,
+          lighting:          _session.lighting,
+          screen_resolution: _session.screen_resolution,
+          age: null, gender: null, browser: null,
+        }));
+      } catch (_) {}
+    }
+    setStatus('Calibration en cours — suivez les instructions à l\'écran…', '#3B82F6');
     Calibration.start(function (score) {
       var ok = score.meanError <= 250;
       setStatus(
         (ok ? '✓ Calibration OK' : '⚠️ Calibration limite')
         + ' — ' + score.meanError.toFixed(0) + ' ± ' + (score.stdError || 0).toFixed(0) + ' px',
-        ok ? '#4ecdc4' : '#e0a96a'
+        ok ? '#3B82F6' : '#9CA3AF'
       );
       _showFreeLookCheck(score);
     }, { alreadyStarted: _wgStarted });
@@ -530,7 +570,7 @@
         if (phase !== 'page' && GazeLogger.isInitialized())
           GazeLogger.logInteraction('stimulus_shown', { phase: phase, test_case_id: info.test_case_id, aoi: info.aoi ? info.aoi.id : null });
       },
-      onProgress: function (t) { setStatus(t, '#4ecdc4'); },
+      onProgress: function (t) { setStatus(t, '#3B82F6'); },
       onDone: _finishTestScenario,
     });
   }
@@ -574,7 +614,7 @@
     var data = GazeLogger.export();
     SessionStore.save(data);
     try { GazeLogger.download(); } catch (_) {}
-    setStatus('Test terminé — session enregistrée.', '#4ecdc4');
+    setStatus('Test terminé — session enregistrée.', '#3B82F6');
     document.getElementById('btn-export').disabled = false;
     ResultsView.show(data);
     ResultsView.showButton(data);
@@ -693,7 +733,7 @@
       setStatus(
         'Profil du ' + when + ' (' + Math.round(stored.meanError) + ' px). '
         + 'Cliquez « Calibrer » pour refaire.',
-        '#9aa6c0'
+        '#9CA3AF'
       );
     }
   })();

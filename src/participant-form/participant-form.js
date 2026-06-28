@@ -16,7 +16,7 @@
  *
  * API publique :
  *   ParticipantForm.show(opts)
- *     opts.accentColor  {string}    couleur d'accent CSS (défaut '#4ecdc4')
+ *     opts.accentColor  {string}    couleur d'accent CSS (défaut '#3B82F6')
  *     opts.engine       {string}    'webgazer' | 'mediapipe'
  *     opts.lux          {number}    luminosité mesurée (lux), pré-remplit l'info
  *     opts.onDone       {function}  callback(data)
@@ -232,7 +232,7 @@
 
   function show(opts) {
     opts = opts || {};
-    var accent = opts.accentColor || '#4ecdc4';
+    var accent = opts.accentColor || '#3B82F6';
     var engine = opts.engine || null;
     var luxHint = roundedLuxHint(opts);
     var id = generateId();

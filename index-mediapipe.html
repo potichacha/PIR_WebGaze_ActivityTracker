@@ -17,130 +17,220 @@
   <link rel="stylesheet" href="src/results-view/results-view.css" />
 
   <style>
-    :root { --bg:#0f0f1a; --panel:#16213e; --accent:#6c8cff; --accent2:#4ecdc4; --text:#eee; --muted:#9aa6c0; }
-    * { box-sizing: border-box; }
-    body { margin:0; background:var(--bg); color:var(--text); font-family:'Segoe UI',Arial,sans-serif;
-      -webkit-user-select:none; -moz-user-select:none; user-select:none; }
+    :root {
+      --bg:      #000;
+      --surface: #0d0d0d;
+      --accent:  #3B82F6;
+      --text:    #F0F0F0;
+      --muted:   #9CA3AF;
+      --border:  #1F2937;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
+
+    body {
+      margin:0; background:var(--bg); color:var(--text);
+      font-family:'Segoe UI',Arial,sans-serif;
+      -webkit-user-select:none; -moz-user-select:none; user-select:none;
+    }
     input, textarea, select { -webkit-user-select:text; user-select:text; }
-    header { padding:14px 22px; display:flex; align-items:center; gap:16px; border-bottom:1px solid rgba(120,140,200,0.18); }
-    header h1 { font-size:1.1rem; margin:0; }
-    header .engine { font-size:0.75rem; background:rgba(108,140,255,0.15); color:var(--accent); padding:3px 10px; border-radius:999px; font-weight:700; }
+
+    /* ── En-tête ────────────────────────────────────────────────────────────── */
+    header {
+      padding:14px 22px; display:flex; align-items:center; gap:16px;
+      border-bottom:1px solid var(--border);
+    }
+    header h1 { font-size:1.1rem; margin:0; font-weight:700; }
+    header .engine {
+      font-size:0.75rem;
+      background:rgba(59,130,246,.1);
+      border:1px solid rgba(59,130,246,.25);
+      color:var(--accent);
+      padding:3px 10px; border-radius:999px; font-weight:700;
+    }
     header a { margin-left:auto; color:var(--muted); font-size:0.85rem; text-decoration:none; }
-    header a:hover { color:var(--accent); }
-    .bar { display:flex; gap:10px; align-items:center; padding:12px 22px; flex-wrap:wrap; border-bottom:1px solid rgba(120,140,200,0.12); }
-    button { background:var(--accent); color:#fff; border:none; border-radius:8px; padding:9px 16px; font-size:0.9rem; cursor:pointer; font-weight:600; }
-    button.ghost { background:transparent; border:1px solid rgba(120,140,200,0.4); color:var(--text); }
-    button:disabled { opacity:0.45; cursor:not-allowed; }
+    header a:hover { color:var(--text); }
+
+    /* ── Barre d'actions ────────────────────────────────────────────────────── */
+    .bar {
+      display:flex; gap:10px; align-items:center; padding:12px 22px;
+      flex-wrap:wrap; border-bottom:1px solid var(--border);
+    }
+    button {
+      background:var(--accent); color:#000; border:none; border-radius:8px;
+      padding:9px 16px; font-size:0.9rem; cursor:pointer; font-weight:700;
+      font-family:inherit; transition:opacity .15s;
+    }
+    button:hover:not(:disabled) { opacity:.88; }
+    button.ghost { background:transparent; border:1px solid var(--border); color:var(--text); }
+    button.ghost:hover:not(:disabled) { border-color:var(--accent); color:var(--text); }
+    button:disabled { opacity:0.35; cursor:not-allowed; }
     #status { font-size:0.85rem; color:var(--muted); margin-left:8px; }
+
+    /* ── Navigation graphiques ──────────────────────────────────────────────── */
     #demo-nav { display:flex; gap:8px; padding:14px 22px 0; }
-    #demo-nav button { background:transparent; border:1px solid rgba(120,140,200,0.3); color:var(--muted); }
-    #demo-nav button.active { background:var(--accent2); color:#0f0f1a; border-color:transparent; }
+    #demo-nav button {
+      background:transparent; border:1px solid var(--border); color:var(--muted); font-weight:600;
+    }
+    #demo-nav button.active { background:var(--accent); color:#000; border-color:transparent; }
+    #demo-nav button:hover:not(.active) { color:var(--text); border-color:var(--accent); }
+
     .chart-area { padding:18px 22px; min-height:60vh; }
-    .tab-panel { display:none; } .tab-panel.active { display:block; }
-    /* overlay calibration MediaPipe */
-    #mp-overlay { position:fixed; inset:0; background:#1a1a2e; z-index:9999; display:none; cursor:crosshair; }
+    .tab-panel { display:none; }
+    .tab-panel.active { display:block; }
+
+    /* ── Overlay calibration ────────────────────────────────────────────────── */
+    #mp-overlay { position:fixed; inset:0; background:#000; z-index:9999; display:none; cursor:crosshair; }
     #mp-overlay.on { display:block; }
     .mp-title { position:absolute; top:18px; left:50%; transform:translateX(-50%); text-align:center; }
-    .mp-title h2 { margin:0; font-size:1.2rem; } .mp-title p { margin:4px 0 0; color:var(--muted); font-size:0.85rem; }
-    .mp-point { position:absolute; width:28px; height:28px; border-radius:50%; background:#e74c3c; border:3px solid #fff;
-      transform:translate(-50%,-50%); cursor:pointer; display:flex; align-items:center; justify-content:center;
-      color:#fff; font-size:10px; font-weight:700; }
-    #mp-mirror { position:fixed; bottom:16px; left:16px; width:160px; border-radius:12px; overflow:hidden;
-      border:2px solid var(--accent); z-index:10000;
-      transition:left .35s ease, right .35s ease, top .35s ease, bottom .35s ease; }
+    .mp-title h2 { margin:0; font-size:1.2rem; font-weight:700; }
+    .mp-title p  { margin:4px 0 0; color:var(--muted); font-size:0.85rem; }
+
+    /* Points de calibration : bleu sur fond noir */
+    .mp-point {
+      position:absolute; width:28px; height:28px; border-radius:50%;
+      background:var(--accent); border:2px solid #fff;
+      transform:translate(-50%,-50%); cursor:pointer;
+      display:flex; align-items:center; justify-content:center;
+      color:#000; font-size:10px; font-weight:700;
+    }
+    .mp-point:focus-visible { outline:3px solid #fff; outline-offset:3px; }
+
+    /* ── Miroir vidéo (mini, bas-gauche) ────────────────────────────────────── */
+    #mp-mirror {
+      position:fixed; bottom:16px; left:16px; width:160px;
+      border-radius:8px; overflow:hidden;
+      border:1px solid var(--border); z-index:10000;
+    }
     #mp-mirror video { width:160px; height:120px; display:block; transform:scaleX(-1); object-fit:cover; }
-    /* Ovale guide d'alignement du visage (comme WebGazer) */
-    #mp-mirror-oval { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-      width:74px; height:96px; border-radius:50%; border:3px dashed #e74c3c; pointer-events:none;
-      transition:border-color .3s, box-shadow .3s; }
-    #mp-mirror-hint { position:absolute; bottom:3px; left:0; right:0; text-align:center;
-      font-size:.62rem; color:#e74c3c; pointer-events:none; text-shadow:0 1px 2px #000; }
-    #gaze-cursor { position:fixed; width:24px; height:24px; border-radius:50%; border:2px solid var(--accent2);
-      background:rgba(78,205,196,0.15); transform:translate(-50%,-50%); pointer-events:none; z-index:9000; display:none; }
+    #mp-mirror-oval {
+      position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+      width:74px; height:96px; border-radius:50%;
+      border:2px dashed #374151; pointer-events:none;
+      transition:border-color .3s;
+    }
+    #mp-mirror-hint {
+      position:absolute; bottom:3px; left:0; right:0; text-align:center;
+      font-size:.62rem; color:var(--muted); pointer-events:none;
+    }
+
+    /* ── Curseur regard ─────────────────────────────────────────────────────── */
+    #gaze-cursor {
+      position:fixed; width:22px; height:22px; border-radius:50%;
+      border:2px solid var(--accent); background:rgba(59,130,246,.1);
+      transform:translate(-50%,-50%); pointer-events:none; z-index:9000; display:none;
+    }
+
     .note { padding:0 22px 18px; color:var(--muted); font-size:0.82rem; max-width:760px; line-height:1.6; }
-    /* Retour visage permanent (toujours visible) */
-    #face-widget { position:fixed; bottom:14px; right:14px; z-index:9600; width:200px;
-      background:rgba(15,15,26,.92); border:1px solid rgba(108,140,255,.4); border-radius:12px;
-      padding:10px 12px; font-size:.78rem; color:#ddd; }
+
+    /* ── Widget retour visage ───────────────────────────────────────────────── */
+    #face-widget {
+      position:fixed; bottom:14px; right:14px; z-index:9600; width:200px;
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:10px; padding:10px 12px; font-size:.78rem; color:var(--text);
+    }
     #face-widget .fw-row { display:flex; justify-content:space-between; margin:3px 0; }
-    #face-widget .fw-dot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:5px; background:#888; }
-    #face-widget .fw-title { font-weight:bold; color:var(--accent2); margin-bottom:5px; }
+    #face-widget .fw-dot {
+      width:9px; height:9px; border-radius:50%;
+      display:inline-block; margin-right:6px; background:#374151;
+    }
+    #face-widget .fw-title {
+      font-weight:700; color:var(--muted); margin-bottom:6px;
+      font-size:.72rem; text-transform:uppercase; letter-spacing:.04em;
+    }
 
     /* ── Positionnement MediaPipe ───────────────────────────────────────────── */
     .mp-pos-box {
       position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-      text-align:center; color:#eee;
+      text-align:center; color:var(--text);
     }
     .mp-pos-video-wrap { position:relative; width:320px; height:240px; margin:0 auto 14px; }
     .mp-pos-video {
-      width:320px; height:240px; border-radius:12px; border:3px solid #6c8cff;
+      width:320px; height:240px; border-radius:10px; border:1px solid var(--border);
       transform:scaleX(-1); object-fit:cover;
     }
     .mp-pos-oval {
       position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-      width:130px; height:170px; border-radius:50%; border:3px dashed #e74c3c;
-      pointer-events:none; transition:border-color .3s, box-shadow .3s;
+      width:130px; height:170px; border-radius:50%;
+      border:2px dashed #374151; pointer-events:none; transition:border-color .3s;
     }
     .mp-pos-status {
-      background:#16213e; border-radius:10px; padding:10px 18px;
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:8px; padding:10px 18px;
       margin-bottom:14px; font-size:.9rem; line-height:1.8; min-width:300px;
     }
-    .mp-pos-status-ok   { color:#27ae60; }
-    .mp-pos-status-warn { color:#e0a96a; }
+    .mp-pos-status-ok   { color:var(--accent); }
+    .mp-pos-status-warn { color:var(--muted); }
     .mp-pos-go {
-      background:#6c8cff; color:#fff; border:none; border-radius:8px;
+      background:var(--accent); color:#000; border:none; border-radius:8px;
       padding:12px 22px; font-weight:700; cursor:pointer; font-family:inherit;
     }
+
     /* ── Mode de calibration ────────────────────────────────────────────────── */
     .mp-cal-mode-box {
       position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
-      background:#16213e; border-radius:14px; padding:28px 34px;
-      width:90%; max-width:520px; color:#eee; text-align:center;
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:12px; padding:28px 34px;
+      width:90%; max-width:520px; color:var(--text); text-align:center;
     }
-    .mp-cal-mode-title { margin:0 0 10px; color:#6c8cff; }
-    .mp-cal-mode-hint  { color:#9aa6c0; font-size:.86rem; line-height:1.6; margin:0 0 20px; }
+    .mp-cal-mode-title { margin:0 0 10px; font-size:1.1rem; font-weight:700; }
+    .mp-cal-mode-hint  { color:var(--muted); font-size:.86rem; line-height:1.6; margin:0 0 20px; }
     .mp-cal-mode-btns  { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; }
     .mp-cal-pursuit {
-      background:#6c8cff; color:#fff; border:none; border-radius:9px;
+      background:var(--accent); color:#000; border:none; border-radius:8px;
       padding:13px 20px; font-weight:700; cursor:pointer; flex:1; min-width:200px; font-family:inherit;
     }
     .mp-cal-clicks {
-      background:transparent; color:#4ecdc4; border:1px solid rgba(78,205,196,.5);
-      border-radius:9px; padding:13px 20px; font-weight:700; cursor:pointer; flex:1; min-width:200px; font-family:inherit;
+      background:transparent; color:var(--text); border:1px solid var(--border);
+      border-radius:8px; padding:13px 20px; font-weight:700;
+      cursor:pointer; flex:1; min-width:200px; font-family:inherit;
     }
+    .mp-cal-clicks:hover { border-color:var(--accent); }
+
     /* ── Vérification libre ─────────────────────────────────────────────────── */
     .mp-freelook-box {
       position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:10006;
-      background:rgba(15,15,26,.92); border:1px solid rgba(108,140,255,.5); border-radius:12px;
-      padding:14px 22px; color:#eee; text-align:center; font-size:.9rem; line-height:1.6;
+      background:var(--surface); border:1px solid var(--border);
+      border-radius:10px; padding:14px 22px; color:var(--text);
+      text-align:center; font-size:.9rem; line-height:1.6; font-family:inherit;
     }
-    .mp-freelook-title  { color:#6c8cff; font-weight:bold; margin-bottom:4px; }
-    .mp-freelook-accent { color:#6c8cff; }
+    .mp-freelook-title  { color:var(--text); font-weight:700; margin-bottom:4px; }
+    .mp-freelook-accent { color:var(--accent); }
     .mp-freelook-ok {
-      margin-top:10px; background:#4ecdc4; color:#0f0f1a; border:none;
+      margin-top:10px; background:var(--accent); color:#000; border:none;
       border-radius:8px; padding:9px 18px; font-weight:700; cursor:pointer; font-family:inherit;
     }
     .mp-freelook-recal {
-      margin-top:10px; background:transparent; color:#e0a96a;
-      border:1px solid rgba(224,169,106,.5); border-radius:8px; padding:9px 18px; cursor:pointer; font-family:inherit;
+      margin-top:10px; background:transparent; color:var(--muted);
+      border:1px solid var(--border); border-radius:8px;
+      padding:9px 18px; cursor:pointer; font-family:inherit;
     }
-    /* ── Point de regard de calibration ────────────────────────────────────── */
+    .mp-freelook-recal:hover { color:var(--text); border-color:var(--accent); }
+
+    /* ── Point de regard live (calibration) ────────────────────────────────── */
     #mp-cal-gaze-dot {
-      position:fixed; width:22px; height:22px; border-radius:50%;
-      background:rgba(108,140,255,.85); border:2px solid #fff;
+      position:fixed; width:20px; height:20px; border-radius:50%;
+      background:rgba(59,130,246,.8); border:2px solid #fff;
       transform:translate(-50%,-50%); pointer-events:none; z-index:10005;
-      box-shadow:0 0 12px 3px rgba(108,140,255,.6);
+      box-shadow:0 0 10px 3px rgba(59,130,246,.5);
       transition:left .05s, top .05s; display:none;
     }
-    /* ── Poursuite : bille et barre de progression ──────────────────────────── */
+
+    /* ── Bille de poursuite ─────────────────────────────────────────────────── */
     .mp-pursuit-ball {
-      position:absolute; width:34px; height:34px; border-radius:50%; z-index:6;
-      background:radial-gradient(circle at 35% 35%, #9db4ff, #6c8cff 60%, #3a55c8);
-      box-shadow:0 0 18px 6px rgba(108,140,255,.55); transform:translate(-50%,-50%);
+      position:absolute; width:32px; height:32px; border-radius:50%; z-index:6;
+      background:var(--accent);
+      box-shadow:0 0 16px 5px rgba(59,130,246,.45);
+      transform:translate(-50%,-50%);
     }
     .mp-pursuit-progress {
-      position:absolute; top:0; left:0; height:4px; width:0%;
-      background:#6c8cff; transition:width .2s;
+      position:absolute; top:0; left:0; height:3px; width:0%;
+      background:var(--accent); transition:width .2s;
     }
   </style>
 </head>
@@ -278,7 +368,7 @@
     // ── Retour visage permanent (visage / distance / luminosité) ────────────────
     // Alimenté par le moteur MediaPipe (détection + échelle inter-oculaire) et par
     // AmbientLight. Mis à jour en continu, quel que soit l'état (aperçu, suivi…).
-    function _fwColor(ok) { return ok ? '#27ae60' : '#e0a96a'; }
+    function _fwColor(ok) { return ok ? '#3B82F6' : '#374151'; }
     setInterval(function () {
       var faceOk = false, distLabel = '—', distOk = false;
       try {
@@ -303,9 +393,9 @@
       var hint = document.getElementById('mp-mirror-hint');
       if (oval && hint) {
         var good = faceOk && distOk;
-        oval.style.borderColor = good ? '#27ae60' : '#e74c3c';
-        oval.style.boxShadow = good ? '0 0 10px 3px rgba(39,174,96,.45)' : 'none';
-        hint.style.color = good ? '#27ae60' : '#e74c3c';
+        oval.style.borderColor = good ? '#3B82F6' : '#374151';
+        oval.style.boxShadow = good ? '0 0 10px 3px rgba(59,130,246,.4)' : 'none';
+        hint.style.color = good ? '#3B82F6' : '#9CA3AF';
         hint.textContent = !faceOk ? 'Aucun visage'
           : distOk ? '✓ Bien placé'
           : (distLabel.indexOf('rapprochez') !== -1 ? 'Rapprochez-vous' : 'Éloignez-vous');
@@ -355,9 +445,9 @@
     });
 
     async function startEngineThenPosition() {
-      if (!_mpReady) setStatus('Chargement du modèle MediaPipe…', '#e0a96a');
+      if (!_mpReady) setStatus('Chargement du modèle MediaPipe…', '#9CA3AF');
       try {
-        setStatus('Initialisation MediaPipe…', '#e0a96a');
+        setStatus('Initialisation MediaPipe…', '#9CA3AF');
         await Engine.init();
         await Engine.start();
         Engine.clearCalibration();
@@ -366,14 +456,14 @@
           chooseCalibrationMode();
         });
       } catch (err) {
-        setStatus('Erreur : ' + (err.message || err), '#e74c3c');
+        setStatus('Erreur : ' + (err.message || err), '#F0F0F0');
       }
     }
 
     // ── Formulaire participant — délégué au module partagé ParticipantForm ──
     function showParticipantForm(onDone) {
       var lux = (window.AmbientLight && typeof AmbientLight.getLux === 'function') ? AmbientLight.getLux() : null;
-      ParticipantForm.show({ accentColor: '#6c8cff', engine: 'mediapipe', lux: lux, onDone: onDone });
+      ParticipantForm.show({ accentColor: '#3B82F6', engine: 'mediapipe', lux: lux, onDone: onDone });
     }
 
     // ── Écran de positionnement avec retour caméra + feedback de distance ────────
@@ -444,11 +534,11 @@
         } else {
           msg = '✓ Distance correcte — visage bien détecté'; ok = true;
         }
-        oval.style.borderColor = ok ? '#27ae60' : '#e74c3c';
-        oval.style.boxShadow = ok ? '0 0 14px 4px rgba(39,174,96,.45)' : 'none';
+        oval.style.borderColor = ok ? '#3B82F6' : '#374151';
+        oval.style.boxShadow = ok ? '0 0 12px 4px rgba(59,130,246,.4)' : 'none';
         statusBox.innerHTML =
-          '<div style="color:' + (ok ? '#27ae60' : '#e0a96a') + '">' + msg + '</div>'
-          + '<div style="color:#9aa6c0;font-size:.78rem;">Échelle faciale : ' + (scale != null ? scale.toFixed(3) : '—') + '</div>';
+          '<div style="color:' + (ok ? '#3B82F6' : '#9CA3AF') + '">' + msg + '</div>'
+          + '<div style="color:#9CA3AF;font-size:.78rem;">Échelle faciale : ' + (scale != null ? scale.toFixed(3) : '—') + '</div>';
         ready = ok;
         goBtn.disabled = !ok;
         goBtn.style.opacity = ok ? '1' : '0.45';
@@ -555,10 +645,10 @@
       overlay.appendChild(box);
 
       pursuitBtn.addEventListener('click', function () {
-        box.remove(); setStatus('Calibration par poursuite…', '#4ecdc4'); runPursuitCalibration();
+        box.remove(); setStatus('Calibration par poursuite…', '#3B82F6'); runPursuitCalibration();
       });
       clicksBtn.addEventListener('click', function () {
-        box.remove(); setStatus('Calibration en cours…', '#4ecdc4'); runCalibration();
+        box.remove(); setStatus('Calibration en cours…', '#3B82F6'); runCalibration();
       });
     }
 
@@ -619,10 +709,10 @@
         var trained = Engine.trainFromSamples();
         if (!trained) {
           overlay.classList.remove('on');
-          setStatus('Poursuite insuffisante (' + Engine.getSampleCount() + ' échantillons). Réessayez.', '#e74c3c');
+          setStatus('Poursuite insuffisante (' + Engine.getSampleCount() + ' échantillons). Réessayez.', '#F0F0F0');
           return;
         }
-        setStatus('Poursuite OK — ' + Engine.getSampleCount() + ' échantillons collectés.', '#4ecdc4');
+        setStatus('Poursuite OK — ' + Engine.getSampleCount() + ' échantillons collectés.', '#3B82F6');
         runValidation();
       }
     }
@@ -651,14 +741,14 @@
           var ok = Engine.recordCalibrationSample(pt.x, pt.y);
           if (ok) {
             clicks++; dot.textContent = clicks + '/' + CLICKS;
-            dot.style.background = '#27ae60';
-            setTimeout(function (){ if (clicks < CLICKS) dot.style.background = '#e74c3c'; }, 150);
+            dot.style.background = '#fff';
+            setTimeout(function (){ if (clicks < CLICKS) dot.style.background = '#F0F0F0'; }, 150);
           } else {
             // Qualité insuffisante : feedback visuel, le clic ne compte pas.
             dot.style.background = '#e67e22';
             document.getElementById('mp-sub').textContent =
               'Point ' + (idx+1) + ' / ' + order.length + ' — gardez les yeux ouverts et fixez le point';
-            setTimeout(function (){ dot.style.background = '#e74c3c'; }, 250);
+            setTimeout(function (){ dot.style.background = '#F0F0F0'; }, 250);
           }
           if (clicks >= CLICKS) { idx++; setTimeout(next, 150); }
         });
@@ -671,7 +761,7 @@
       var trained = Engine.trainFromSamples();
       overlay.classList.remove('on');
       if (!trained) {
-        setStatus('Calibration insuffisante (' + Engine.getSampleCount() + ' échantillons). Réessayez.', '#e74c3c');
+        setStatus('Calibration insuffisante (' + Engine.getSampleCount() + ' échantillons). Réessayez.', '#F0F0F0');
         return;
       }
       // Validation rapide : erreur moyenne sur la grille de validation.
@@ -789,7 +879,7 @@
         + ' — brut ' + mean.toFixed(0) + '±' + std.toFixed(0)
         + ' px · corrigé (LOO) ' + looMean.toFixed(0) + ' px'
         + (lam != null ? ' · λ=' + lam.toExponential(1) : '')
-        + '  [' + qTxt + ']  ·  Ctrl+clic pour affiner en continu', ok ? '#4ecdc4' : '#e0a96a');
+        + '  [' + qTxt + ']  ·  Ctrl+clic pour affiner en continu', ok ? '#3B82F6' : '#9CA3AF');
       document.getElementById('btn-start').disabled = false;
 
       // ── Phase « test libre » : le point bleu reste affiché et corrigé ; l'utilisateur
@@ -881,7 +971,7 @@
           if (phase !== 'page' && window.GazeLogger.isInitialized())
             GazeLogger.logInteraction('stimulus_shown', { phase: phase, test_case_id: info.test_case_id, aoi: info.aoi ? info.aoi.id : null });
         },
-        onProgress: function (t) { setStatus(t, '#4ecdc4'); },
+        onProgress: function (t) { setStatus(t, '#3B82F6'); },
         onDone: function () { finishTestScenario(); },
       });
     }
@@ -914,7 +1004,7 @@
       var data = GazeLogger.export();
       var id = SessionStore.save(data);
       try { GazeLogger.download(); } catch (_) {}
-      setStatus('Test terminé — session enregistrée.', '#4ecdc4');
+      setStatus('Test terminé — session enregistrée.', '#3B82F6');
       ResultsView.show(data);
       ResultsView.showButton(data); // bouton persistant pour rouvrir les résultats
     }
@@ -1019,12 +1109,12 @@
         GazeLogger.logInteraction('online_recalibration', { x: ev.clientX, y: ev.clientY, applied: !!ok });
       setStatus(ok ? '↻ Modèle affiné (Ctrl+clic) — λ=' + (Engine.getLambda()||0).toExponential(1)
                    : '↻ Échantillon rejeté (qualité). Réessayez en fixant le curseur.',
-        ok ? '#4ecdc4' : '#e0a96a');
+        ok ? '#3B82F6' : '#9CA3AF');
     }, true);
 
     document.getElementById('btn-start').addEventListener('click', async function () {
       var btn = this;
-      if (!Engine.isTrained()) { setStatus('Calibrez d\'abord (aucun modèle entraîné).', '#e74c3c'); return; }
+      if (!Engine.isTrained()) { setStatus('Calibrez d\'abord (aucun modèle entraîné).', '#F0F0F0'); return; }
       // Nettoyer le point de regard de vérification s'il est encore actif.
       stopCalGazeDot();
       var fl = document.getElementById('mp-freelook'); if (fl) fl.remove();
@@ -1032,12 +1122,12 @@
       try {
         // Démarrage direct depuis un profil mémorisé : la caméra n'est pas encore active.
         if (Engine.getStatus() !== 'running') {
-          setStatus('Démarrage caméra…', '#e0a96a');
+          setStatus('Démarrage caméra…', '#9CA3AF');
           await Engine.start();
           mirror.style.display = 'block';
         }
       } catch (err) {
-        setStatus('Erreur caméra : ' + (err.message || err), '#e74c3c'); btn.disabled = false; return;
+        setStatus('Erreur caméra : ' + (err.message || err), '#F0F0F0'); btn.disabled = false; return;
       }
       var stored = Engine.getStoredProfile();
       var pid = (_session && _session.participant_id) || 'participant-mediapipe';
@@ -1057,7 +1147,7 @@
       if (_activeChart) _activeChart.setGazeMode(true);
       document.getElementById('btn-stop').disabled = false;
       document.getElementById('btn-export').disabled = false;
-      setStatus('Suivi du regard actif.', '#4ecdc4');
+      setStatus('Suivi du regard actif.', '#3B82F6');
     });
 
     document.getElementById('btn-stop').addEventListener('click', function () {
@@ -1094,7 +1184,7 @@
         });
       }
       var st = GazeLogger.getStats();
-      setStatus('Arrêté — ' + st.fixations + ' fixations, ' + st.saccades + ' saccades, ' + st.aoiHits + ' AOI.', '#9aa6c0');
+      setStatus('Arrêté — ' + st.fixations + ' fixations, ' + st.saccades + ' saccades, ' + st.aoiHits + ' AOI.', '#9CA3AF');
       document.getElementById('btn-stop').disabled = true;
       // Visualisation du parcours du regard.
       try { GazeViz.show(GazeLogger.export()); } catch (_) {}
@@ -1115,7 +1205,7 @@
       if (_previewOn || _gazeOn) return;
       try {
         if (Engine.getStatus() !== 'running') {
-          setStatus('Aperçu — démarrage caméra…', '#e0a96a');
+          setStatus('Aperçu — démarrage caméra…', '#9CA3AF');
           await Engine.start();
           mirror.style.display = 'block';
         }
@@ -1123,9 +1213,9 @@
         startCalGazeDot(); // réutilise le point bleu de vérification
         setStatus('Aperçu actif — le point bleu suit votre regard. '
           + (whenLabel ? 'Profil ' + whenLabel + '. ' : '')
-          + 'Cliquez « Démarrer le suivi » pour enregistrer, ou « Calibrer » pour refaire.', '#4ecdc4');
+          + 'Cliquez « Démarrer le suivi » pour enregistrer, ou « Calibrer » pour refaire.', '#3B82F6');
       } catch (err) {
-        setStatus('Aperçu indisponible : ' + (err.message || err) + ' — utilisez « Calibrer ».', '#e0a96a');
+        setStatus('Aperçu indisponible : ' + (err.message || err) + ' — utilisez « Calibrer ».', '#9CA3AF');
       }
     }
     // Quand on lance le vrai suivi, on coupe l'aperçu pour ne pas dédoubler le point.
@@ -1141,7 +1231,7 @@
       var when = prof.timestamp ? prof.timestamp.slice(0,10) : '';
       if (prof.meta && prof.meta.session) _session = prof.meta.session;
       document.getElementById('btn-start').disabled = false; // suivi direct possible
-      setStatus('Profil de calibration trouvé (' + when + '). Démarrage de l\'aperçu…', '#9aa6c0');
+      setStatus('Profil de calibration trouvé (' + when + '). Démarrage de l\'aperçu…', '#9CA3AF');
       var _waitReady = setInterval(function () {
         if (_mpReady) { clearInterval(_waitReady); startPreviewGaze(when); }
       }, 200);

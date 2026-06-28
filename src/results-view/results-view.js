@@ -724,9 +724,9 @@
       var r = Math.max(5, Math.min(18, 6 + (f.d || 0) / 55));
       ctx.beginPath();
       ctx.arc(f.x, f.y, r, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(78,205,196,0.28)';
+      ctx.fillStyle = 'rgba(59,130,246,0.20)';
       ctx.fill();
-      ctx.strokeStyle = '#4ecdc4';
+      ctx.strokeStyle = '#3B82F6';
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.fillStyle = '#fff';

@@ -9,8 +9,8 @@ html, body, #home-screen, #home-screen * {
 
 body {
   font-family: Arial, sans-serif;
-  background: #0f0f1a;
-  color: #eee;
+  background: #000;
+  color: #F0F0F0;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -27,43 +27,44 @@ body {
 #home-screen h1 {
   font-size: 2rem;
   margin-bottom: 12px;
-  color: #4ecdc4;
+  color: #3B82F6;
 }
 
 #home-screen p {
-  color: #aaa;
+  color: #9CA3AF;
   font-size: 1rem;
   margin-bottom: 28px;
   line-height: 1.7;
 }
 
 #status-bar {
-  background: #16213e;
+  background: #0d0d0d;
+  border: 1px solid #1F2937;
   border-radius: 12px;
   padding: 16px 24px;
   margin-bottom: 24px;
   font-size: 0.9rem;
-  color: #bbb;
+  color: #9CA3AF;
   line-height: 2;
   text-align: left;
 }
 
-#status-bar span { font-weight: bold; color: #4ecdc4; }
+#status-bar span { font-weight: bold; color: #3B82F6; }
 
 #improvements-panel {
-  background: #0d1b2a;
-  border: 1px solid #2c3e50;
+  background: #0d0d0d;
+  border: 1px solid #1F2937;
   border-radius: 12px;
   padding: 14px 20px;
   margin-bottom: 24px;
   font-size: 0.82rem;
-  color: #888;
+  color: #9CA3AF;
   text-align: left;
   line-height: 1.9;
 }
 
 #improvements-panel summary {
-  color: #4ecdc4;
+  color: #3B82F6;
   cursor: pointer;
   font-size: 0.9rem;
   font-weight: bold;
@@ -88,13 +89,13 @@ body {
 .btn:hover  { opacity: 0.88; }
 .btn:active { transform: scale(0.97); }
 
-.btn-primary   { background: #4ecdc4; color: #0f0f1a; font-weight: bold; }
-.btn-secondary { background: #2c3e50; color: #eee; }
-.btn-danger    { background: #e74c3c; color: #fff; }
+.btn-primary   { background: #3B82F6; color: #000; font-weight: bold; }
+.btn-secondary { background: #1F2937; color: #F0F0F0; }
+.btn-danger    { background: #374151; color: #F0F0F0; }
 
 .btn-animated {
-  background: linear-gradient(135deg, #6c5ce7, #a29bfe);
-  color: #fff;
+  background: #3B82F6;
+  color: #000;
   font-weight: bold;
   position: relative;
   overflow: hidden;
@@ -118,7 +119,8 @@ body {
 
 #score-display {
   display: none;
-  background: #16213e;
+  background: #0d0d0d;
+  border: 1px solid #1F2937;
   border-radius: 12px;
   padding: 20px 28px;
   margin-top: 20px;
@@ -126,9 +128,9 @@ body {
   text-align: left;
 }
 
-#score-display h3 { margin-bottom: 12px; color: #4ecdc4; text-align: center; }
+#score-display h3 { margin-bottom: 12px; color: #3B82F6; text-align: center; }
 #score-display table { width: 100%; border-collapse: collapse; }
-#score-display td { padding: 6px 10px; border-bottom: 1px solid #2c3e50; }
+#score-display td { padding: 6px 10px; border-bottom: 1px solid #1F2937; }
 #score-display td:last-child { text-align: right; font-weight: bold; }
 
 .quadrant-grid {
@@ -139,32 +141,33 @@ body {
 }
 
 .quadrant-cell {
-  background: #0d1b2a;
+  background: #000;
+  border: 1px solid #1F2937;
   border-radius: 8px;
   padding: 8px 12px;
   font-size: 0.82rem;
 }
 
-.quadrant-cell .label { color: #888; }
+.quadrant-cell .label { color: #9CA3AF; }
 .quadrant-cell .val   { font-weight: bold; float: right; }
-.quadrant-cell .val.good { color: #27ae60; }
-.quadrant-cell .val.bad  { color: #e74c3c; }
-.quadrant-cell .val.warn { color: #e67e22; }
+.quadrant-cell .val.good { color: #3B82F6; }
+.quadrant-cell .val.bad  { color: #F0F0F0; }
+.quadrant-cell .val.warn { color: #9CA3AF; }
 
 #drift-indicator {
   display: none;
   margin-top: 14px;
-  background: #1a0a0a;
-  border: 1px solid #c0392b;
+  background: #0d0d0d;
+  border: 1px solid #374151;
   border-radius: 8px;
   padding: 10px 14px;
   font-size: 0.85rem;
-  color: #e74c3c;
+  color: #F0F0F0;
 }
 
 #webgazer-status {
   font-size: 0.82rem;
-  color: #888;
+  color: #9CA3AF;
   margin-top: 22px;
   display: flex;
   align-items: center;
@@ -176,13 +179,13 @@ body {
   display: inline-block;
   width: 9px; height: 9px;
   border-radius: 50%;
-  background: #888;
+  background: #374151;
   flex-shrink: 0;
 }
 
-#webgazer-status.ready .dot   { background: #27ae60; }
-#webgazer-status.loading .dot { background: #f39c12; animation: blink 1s infinite; }
-#webgazer-status.error .dot   { background: #e74c3c; }
+#webgazer-status.ready .dot   { background: #3B82F6; }
+#webgazer-status.loading .dot { background: #3B82F6; animation: blink 1s infinite; }
+#webgazer-status.error .dot   { background: #9CA3AF; }
 
 @keyframes blink {
   0%, 100% { opacity: 1; }

@@ -12,8 +12,8 @@
   position: fixed;
   inset: 0;
   z-index: 100000;
-  background: #0d1424;
-  color: #eee;
+  background: #000;
+  color: #F0F0F0;
   font-family: Arial, sans-serif;
   display: flex;
   flex-direction: column;
@@ -27,8 +27,8 @@
   left: 50%;
   transform: translateX(-50%);
   z-index: 99000;
-  background: #6c8cff;
-  color: #fff;
+  background: #3B82F6;
+  color: #000;
   border: none;
   border-radius: 10px;
   padding: 12px 22px;
@@ -48,7 +48,7 @@
 
 .rv-header {
   padding: 14px 22px;
-  border-bottom: 1px solid rgba(120, 140, 200, 0.2);
+  border-bottom: 1px solid #1F2937;
   display: flex;
   align-items: center;
   gap: 16px;
@@ -56,7 +56,7 @@
 }
 
 .rv-header__title {
-  color: #6c8cff;
+  color: #3B82F6;
   font-size: 1.05rem;
   font-weight: bold;
 }
@@ -70,22 +70,24 @@
 }
 
 .rv-engine-badge--mediapipe {
-  background: #6c8cff;
-  color: #fff;
+  background: rgba(59, 130, 246, 0.1);
+  color: #3B82F6;
+  border: 1px solid rgba(59, 130, 246, 0.25);
 }
 
 .rv-engine-badge--webgazer {
-  background: #4ecdc4;
-  color: #0f0f1a;
+  background: rgba(59, 130, 246, 0.1);
+  color: #3B82F6;
+  border: 1px solid rgba(59, 130, 246, 0.25);
 }
 
 .rv-engine-badge--unknown {
-  background: #7f8c8d;
-  color: #fff;
+  background: #1F2937;
+  color: #9CA3AF;
 }
 
 .rv-header__meta {
-  color: #9aa6c0;
+  color: #9CA3AF;
   font-size: 0.85rem;
 }
 
@@ -96,31 +98,31 @@
 /* ── Onglets ────────────────────────────────────────────────────────────────── */
 
 .rv-tab {
-  border: 1px solid rgba(120, 140, 200, 0.4);
+  border: 1px solid #1F2937;
   border-radius: 8px;
   padding: 9px 16px;
   cursor: pointer;
   font-weight: 600;
   font-size: 0.9rem;
   background: transparent;
-  color: #9aa6c0;
+  color: #9CA3AF;
   font-family: Arial, sans-serif;
   transition: background 0.15s, color 0.15s;
 }
 
 .rv-tab:hover {
-  color: #eee;
+  color: #F0F0F0;
 }
 
 .rv-tab--active {
-  background: #4ecdc4;
-  color: #0f0f1a;
+  background: #3B82F6;
+  color: #000;
   border-color: transparent;
 }
 
 .rv-close-btn {
-  background: #6c8cff;
-  color: #fff;
+  background: #3B82F6;
+  color: #000;
   border: none;
   border-radius: 8px;
   padding: 9px 16px;
@@ -153,27 +155,28 @@
 }
 
 .rv-stat-card {
-  background: #16213e;
+  background: #0d0d0d;
+  border: 1px solid #1F2937;
   border-radius: 10px;
   padding: 12px 16px;
   min-width: 120px;
 }
 
 .rv-stat-label {
-  color: #9aa6c0;
+  color: #9CA3AF;
   font-size: 0.74rem;
 }
 
 .rv-stat-value {
   font-size: 1.25rem;
   font-weight: 700;
-  color: #4ecdc4;
+  color: #3B82F6;
 }
 
 /* ── Tableau d'analyse ──────────────────────────────────────────────────────── */
 
 .rv-section-title {
-  color: #6c8cff;
+  color: #3B82F6;
   margin: 0 0 10px;
   font-size: 1rem;
 }
@@ -185,33 +188,33 @@
 }
 
 .rv-table-head tr {
-  color: #4ecdc4;
+  color: #3B82F6;
   text-align: left;
 }
 
 .rv-th {
   padding: 8px 10px;
-  border-bottom: 1px solid rgba(120, 140, 200, 0.2);
+  border-bottom: 1px solid #1F2937;
 }
 
 .rv-td {
   padding: 7px 10px;
-  border-bottom: 1px solid rgba(120, 140, 200, 0.1);
+  border-bottom: 1px solid #111827;
 }
 
 .rv-score-cell {
   padding: 7px 10px;
-  border-bottom: 1px solid rgba(120, 140, 200, 0.1);
+  border-bottom: 1px solid #111827;
   font-weight: 700;
 }
 
-.rv-score--good  { color: #27ae60; }
-.rv-score--ok    { color: #e0a96a; }
-.rv-score--bad   { color: #e74c3c; }
-.rv-score--none  { color: #9aa6c0; }
+.rv-score--good  { color: #3B82F6; }
+.rv-score--ok    { color: #9CA3AF; }
+.rv-score--bad   { color: #F0F0F0; }
+.rv-score--none  { color: #9CA3AF; }
 
 .rv-empty-msg {
-  color: #9aa6c0;
+  color: #9CA3AF;
   line-height: 1.6;
 }
 
@@ -222,7 +225,7 @@
 }
 
 .rv-chart-label {
-  color: #4ecdc4;
+  color: #3B82F6;
   font-weight: 600;
   margin-bottom: 6px;
 }
@@ -231,8 +234,8 @@
   position: relative;
   width: 100%;
   max-width: 900px;
-  background: #0a0f1e;
-  border: 1px solid rgba(120, 140, 200, 0.25);
+  background: #000;
+  border: 1px solid #1F2937;
   border-radius: 10px;
   overflow: hidden;
 }
@@ -251,11 +254,11 @@
 }
 
 .rv-heatmap-legend {
-  color: #9aa6c0;
+  color: #9CA3AF;
   font-size: 0.8rem;
   margin-top: 8px;
 }
 
-.rv-legend-good   { color: #3cb44b; }
-.rv-legend-warm   { color: #e69632; }
-.rv-legend-hot    { color: #e74c3c; }
+.rv-legend-good   { color: #3B82F6; }
+.rv-legend-warm   { color: #9CA3AF; }
+.rv-legend-hot    { color: #F0F0F0; }

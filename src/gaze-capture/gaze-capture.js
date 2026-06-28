@@ -77,12 +77,12 @@
 
   function statusAppearance(current) {
     if (current === 'running') {
-      return { color: '#27ae60', label: 'Regard capturé' };
+      return { color: '#3B82F6', label: 'Regard capturé' };
     }
     if (current === 'error') {
-      return { color: '#e74c3c', label: errorMessage || 'Erreur webcam' };
+      return { color: '#9CA3AF', label: errorMessage || 'Erreur webcam' };
     }
-    return { color: '#888', label: 'Webcam inactive' };
+    return { color: '#374151', label: 'Webcam inactive' };
   }
 
   function updateStatusUI(current) {

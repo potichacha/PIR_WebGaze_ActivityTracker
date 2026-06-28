@@ -6,115 +6,163 @@
   <title>WebGaze Activity Tracker — Choix du moteur</title>
   <style>
     :root {
-      --bg: #0f0f1a; --panel: #16213e; --panel2: #1a2547;
-      --accent: #4ecdc4; --accent2: #6c8cff; --text: #eee; --muted: #9aa6c0;
+      --bg:      #000;
+      --surface: #0d0d0d;
+      --accent:  #3B82F6;
+      --text:    #F0F0F0;
+      --muted:   #9CA3AF;
+      --border:  #1F2937;
     }
-    * { box-sizing: border-box; }
+    *, *::before, *::after { box-sizing: border-box; }
+
+    :focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 3px;
+      border-radius: 3px;
+    }
+
     body {
-      margin: 0; min-height: 100vh; background: radial-gradient(circle at 50% 0%, #1a2547, var(--bg) 70%);
-      color: var(--text); font-family: 'Segoe UI', Arial, sans-serif;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      margin: 0; min-height: 100vh;
+      background: var(--bg); color: var(--text);
+      font-family: 'Segoe UI', Arial, sans-serif;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
       padding: 40px 20px;
     }
-    h1 { font-size: 2rem; margin: 0 0 8px; text-align: center; }
-    .subtitle { color: var(--muted); text-align: center; max-width: 640px; margin: 0 0 36px; line-height: 1.6; }
-    .cards { display: flex; gap: 28px; flex-wrap: wrap; justify-content: center; max-width: 920px; }
-    .card {
-      background: linear-gradient(160deg, var(--panel2), var(--panel));
-      border: 1px solid rgba(120,140,200,0.18); border-radius: 18px;
-      width: 400px; max-width: 100%; padding: 30px 30px 26px;
-      display: flex; flex-direction: column;
-      transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+
+    h1 {
+      font-size: 2rem; margin: 0 0 12px;
+      text-align: center; font-weight: 700;
     }
-    .card:hover { transform: translateY(-4px); border-color: var(--accent); box-shadow: 0 14px 40px rgba(0,0,0,0.4); }
-    .badge { align-self: flex-start; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.06em;
-      padding: 4px 10px; border-radius: 999px; margin-bottom: 14px; font-weight: 700; }
-    .badge.wg { background: rgba(78,205,196,0.15); color: var(--accent); }
-    .badge.mp { background: rgba(108,140,255,0.15); color: var(--accent2); }
-    .card h2 { margin: 0 0 6px; font-size: 1.35rem; }
-    .card .tagline { color: var(--muted); font-size: 0.92rem; margin: 0 0 18px; }
+
+    .subtitle {
+      color: var(--muted); text-align: center;
+      max-width: 640px; margin: 0 0 36px; line-height: 1.6;
+    }
+
+    .cards {
+      display: flex; gap: 20px; flex-wrap: wrap;
+      justify-content: center; max-width: 880px;
+    }
+
+    article.card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      width: 400px; max-width: 100%; padding: 28px 28px 24px;
+      display: flex; flex-direction: column;
+      transition: border-color 0.18s;
+    }
+    article.card:hover { border-color: var(--accent); }
+
+    .badge {
+      align-self: flex-start;
+      font-size: 0.72rem; text-transform: uppercase;
+      letter-spacing: 0.06em; padding: 3px 10px;
+      border-radius: 999px; margin-bottom: 14px;
+      font-weight: 700;
+      background: rgba(59, 130, 246, 0.1);
+      color: var(--accent);
+      border: 1px solid rgba(59, 130, 246, 0.25);
+    }
+
+    article.card h2 { margin: 0 0 6px; font-size: 1.3rem; font-weight: 700; }
+    .tagline { color: var(--muted); font-size: 0.9rem; margin: 0 0 18px; }
+
     ul { list-style: none; padding: 0; margin: 0 0 22px; flex: 1; }
-    li { padding: 7px 0 7px 26px; position: relative; font-size: 0.92rem; line-height: 1.4; }
-    li::before { content: '✓'; position: absolute; left: 0; color: var(--accent); font-weight: 700; }
-    li.con::before { content: '–'; color: #e08a6a; }
+    li {
+      padding: 6px 0 6px 22px; position: relative;
+      font-size: 0.9rem; line-height: 1.45;
+    }
+    li::before {
+      content: '✓'; position: absolute; left: 0;
+      color: var(--accent); font-weight: 700;
+    }
+    li.con { color: var(--muted); }
+    li.con::before { content: '–'; color: var(--muted); }
+
     .btn {
       display: block; text-align: center; text-decoration: none;
-      padding: 13px 20px; border-radius: 10px; font-weight: 700; font-size: 1rem;
-      color: #0f0f1a; transition: filter 0.15s;
+      padding: 12px 20px; border-radius: 8px;
+      font-weight: 700; font-size: 0.95rem;
+      background: var(--accent); color: #000;
+      transition: opacity 0.15s;
     }
-    .btn:hover { filter: brightness(1.08); }
-    .btn.wg { background: var(--accent); }
-    .btn.mp { background: var(--accent2); color: #fff; }
-    .foot { margin-top: 34px; color: var(--muted); font-size: 0.82rem; text-align: center; max-width: 640px; line-height: 1.6; }
-    .foot a { color: var(--accent); }
+    .btn:hover { opacity: 0.88; }
+
+    .foot {
+      margin-top: 32px; color: var(--muted);
+      font-size: 0.82rem; text-align: center;
+      max-width: 640px; line-height: 1.6;
+    }
+    .foot a { color: var(--accent); text-underline-offset: 3px; }
   </style>
 </head>
 <body>
-  <h1>WebGaze Activity Tracker</h1>
-  <p class="subtitle">
-    Choisissez le moteur de suivi du regard. Les deux fonctionnent à partir d'une
-    <strong>webcam standard</strong>, 100&nbsp;% dans le navigateur (aucune donnée envoyée).
-    La calibration, le post-traitement (fixations/saccades) et l'export sont identiques.
-  </p>
+  <main>
+    <h1>WebGaze Activity Tracker</h1>
+    <p class="subtitle">
+      Choisissez le moteur de suivi du regard. Les deux fonctionnent à partir d'une
+      <strong>webcam standard</strong>, 100&nbsp;% dans le navigateur (aucune donnée envoyée).
+      La calibration, le post-traitement et l'export sont identiques.
+    </p>
 
-  <div class="cards">
-    <!-- WebGazer -->
-    <div class="card">
-      <span class="badge wg">Référence · prêt à l'emploi</span>
-      <h2>WebGazer.js</h2>
-      <p class="tagline">Solution clé-en-main, cité en recherche.</p>
-      <ul>
-        <li>Mapping regard → écran intégré</li>
-        <li>Calibration et régression natives</li>
-        <li>Reproductible (littérature scientifique)</li>
-        <li class="con">Précision moyenne, ~10–30 Hz</li>
-        <li class="con">Compensation de tête limitée</li>
-      </ul>
-      <a class="btn wg" href="index-webgazer.html">Lancer un test avec WebGazer →</a>
+    <div class="cards">
+      <article class="card">
+        <span class="badge">Référence · prêt à l'emploi</span>
+        <h2>WebGazer.js</h2>
+        <p class="tagline">Solution clé-en-main, cité en recherche.</p>
+        <ul>
+          <li>Mapping regard → écran intégré</li>
+          <li>Calibration et régression natives</li>
+          <li>Reproductible (littérature scientifique)</li>
+          <li class="con">Précision moyenne, ~10–30 Hz</li>
+          <li class="con">Compensation de tête limitée</li>
+        </ul>
+        <a class="btn" href="index-webgazer.html">Lancer un test avec WebGazer →</a>
+      </article>
+
+      <article class="card">
+        <span class="badge">Expérimental · plus précis</span>
+        <h2>MediaPipe FaceLandmarker</h2>
+        <p class="tagline">Landmarks iris + pose de tête, régression maison.</p>
+        <ul>
+          <li>Détection iris haute précision (478 points)</li>
+          <li>Compensation de tête native (pose 3D)</li>
+          <li>Cadence élevée (30–60 Hz, GPU)</li>
+          <li class="con">Mapping écran appris à la calibration</li>
+          <li class="con">Plus récent, à valider en conditions réelles</li>
+        </ul>
+        <a class="btn" href="index-mediapipe.html">Lancer un test avec MediaPipe →</a>
+      </article>
     </div>
 
-    <!-- MediaPipe -->
-    <div class="card">
-      <span class="badge mp">Expérimental · plus précis</span>
-      <h2>MediaPipe FaceLandmarker</h2>
-      <p class="tagline">Landmarks iris + pose de tête, régression maison.</p>
-      <ul>
-        <li>Détection iris haute précision (478 points)</li>
-        <li>Compensation de tête native (pose 3D)</li>
-        <li>Cadence élevée (30–60 Hz, GPU)</li>
-        <li class="con">Mapping écran appris à la calibration</li>
-        <li class="con">Plus récent, à valider en conditions réelles</li>
-      </ul>
-      <a class="btn mp" href="index-mediapipe.html">Lancer un test avec MediaPipe →</a>
+    <p class="subtitle" style="margin-top:26px;">
+      Quel que soit le moteur choisi, la session enchaîne automatiquement :
+      formulaire participant → calibration → <strong>scénario de test guidé</strong>
+      (cercle rouge puis 15&nbsp;s d'exploration libre, sur les 3 graphiques) → résultats.
+    </p>
+
+    <div class="cards" style="margin-top:14px;">
+      <article class="card">
+        <span class="badge">Consultation</span>
+        <h2>Sessions enregistrées</h2>
+        <p class="tagline">Revoir et comparer les tests passés.</p>
+        <ul>
+          <li>Liste : date, lux, px calibration, lunettes…</li>
+          <li>Analyse par stimulus + heatmap + scanpath</li>
+          <li>Export / import (JSON, CSV)</li>
+        </ul>
+        <a class="btn" href="session-viewer.html">Consulter les sessions →</a>
+      </article>
     </div>
-  </div>
 
-  <p class="subtitle" style="margin-top:26px;">
-    Quel que soit le moteur choisi ci-dessus, la session enchaîne automatiquement :
-    formulaire participant → calibration → <strong>scénario de test guidé</strong>
-    (cercle rouge puis 15 s d'exploration libre, sur les 3 graphiques) → résultats.
-  </p>
-
-  <!-- Consultation des sessions enregistrées -->
-  <div class="cards" style="margin-top:14px;">
-    <div class="card" style="width:400px;">
-      <span class="badge" style="background:rgba(78,205,196,.15);color:#4ecdc4;">Consultation</span>
-      <h2>Sessions enregistrées</h2>
-      <p class="tagline">Revoir et comparer les tests passés.</p>
-      <ul>
-        <li>Liste : date, nom, lux, px calibration, lunettes…</li>
-        <li>Analyse par stimulus + heatmap + scanpath</li>
-        <li>Export / import (JSON, CSV)</li>
-      </ul>
-      <a class="btn" style="background:var(--accent);" href="session-viewer.html">Consulter les sessions →</a>
-    </div>
-  </div>
-
-  <p class="foot">
-    Projet PIR — Laboratoire i3S, Université Côte d'Azur. Les deux moteurs partagent
-    la même chaîne d'analyse et le même format d'export. Voir le
-    <a href="README.md">README</a> et le
-    <a href="docs/LOG_FORMAT.md">format de log</a>.
-  </p>
+    <p class="foot">
+      Projet PIR — Laboratoire i3S, Université Côte d'Azur. Les deux moteurs partagent
+      la même chaîne d'analyse et le même format d'export. Voir le
+      <a href="README.md">README</a> et le
+      <a href="docs/LOG_FORMAT.md">format de log</a>.
+    </p>
+  </main>
 </body>
 </html>

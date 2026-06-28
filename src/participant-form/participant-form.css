@@ -1,9 +1,9 @@
-/* participant-form.css — styles du formulaire participant partagé */
+/* participant-form.css — formulaire participant (palette noir/bleu, WCAG AA) */
 
 #pf-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.72);
+  background: rgba(0, 0, 0, 0.80);
   z-index: 99000;
   display: flex;
   align-items: center;
@@ -12,34 +12,36 @@
 }
 
 .pf-card {
-  background: #16213e;
-  border-radius: 16px;
+  background: #0d0d0d;
+  border: 1px solid #1F2937;
+  border-radius: 12px;
   padding: 32px 36px;
   width: 90%;
   max-width: 420px;
-  color: #eee;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+  color: #F0F0F0;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.7);
 }
 
 .pf-title {
-  margin: 0 0 4px;
+  margin: 0 0 6px;
   font-size: 1.1rem;
+  font-weight: 700;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
 .pf-title-text {
-  color: var(--pf-accent, #4ecdc4);
+  color: #F0F0F0;
 }
 
 .pf-engine-badge {
   font-size: 0.72rem;
-  background: rgba(78, 205, 196, 0.12);
-  border: 1px solid rgba(78, 205, 196, 0.2);
+  background: rgba(59, 130, 246, 0.1);
+  border: 1px solid rgba(59, 130, 246, 0.25);
   border-radius: 999px;
   padding: 2px 10px;
-  color: var(--pf-accent, #4ecdc4);
+  color: #3B82F6;
   font-weight: 600;
 }
 
@@ -49,34 +51,35 @@
 
 .pf-hint {
   margin: 0 0 20px;
-  color: #9aa6c0;
-  font-size: 0.81rem;
-  line-height: 1.5;
+  color: #9CA3AF;
+  font-size: 0.82rem;
+  line-height: 1.55;
 }
 
+/* ID généré — affiché en grand pour que le participant le note */
 .pf-id-box {
-  background: #0a1628;
-  border: 2px solid var(--pf-accent, #4ecdc4);
-  border-radius: 10px;
-  padding: 14px 18px;
+  background: #000;
+  border: 1px solid #1F2937;
+  border-radius: 8px;
+  padding: 16px 18px;
   margin-bottom: 22px;
   text-align: center;
 }
 
 .pf-id-label {
-  font-size: 0.72rem;
-  color: #9aa6c0;
-  margin-bottom: 4px;
-  letter-spacing: 0.05em;
+  font-size: 0.7rem;
+  color: #9CA3AF;
+  margin-bottom: 6px;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 #pf-id-display {
   font-family: monospace;
-  font-size: 1.55rem;
-  color: var(--pf-accent, #4ecdc4);
+  font-size: 1.5rem;
+  color: #3B82F6;
   font-weight: 800;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.1em;
 }
 
 .pf-field {
@@ -84,27 +87,27 @@
 }
 
 .pf-field--last {
-  margin-bottom: 22px;
+  margin-bottom: 24px;
 }
 
 .pf-label {
   display: block;
   font-size: 0.8rem;
-  color: #9aa6c0;
-  margin-bottom: 5px;
+  color: #9CA3AF;
+  margin-bottom: 6px;
 }
 
 .pf-lux-note {
-  color: var(--pf-accent, #4ecdc4);
+  color: #3B82F6;
   font-size: 0.75rem;
 }
 
 .pf-select {
   width: 100%;
-  background: #0d1b2a;
-  border: 1px solid #2c3e50;
-  border-radius: 8px;
-  color: #eee;
+  background: #000;
+  border: 1px solid #1F2937;
+  border-radius: 6px;
+  color: #F0F0F0;
   padding: 9px 12px;
   box-sizing: border-box;
   font-size: 0.93rem;
@@ -112,16 +115,20 @@
   font-family: inherit;
   transition: border-color 0.2s;
   cursor: pointer;
+  appearance: auto;
 }
 
-.pf-select:focus {
-  border-color: var(--pf-accent, #4ecdc4);
+.pf-select:focus,
+.pf-select:focus-visible {
+  border-color: #3B82F6;
+  outline: 2px solid #3B82F6;
+  outline-offset: 2px;
 }
 
 .pf-submit {
   width: 100%;
-  background: var(--pf-accent, #4ecdc4);
-  color: #0f0f1a;
+  background: #3B82F6;
+  color: #000;
   border: none;
   border-radius: 8px;
   padding: 12px;
@@ -132,6 +139,9 @@
   transition: opacity 0.15s;
 }
 
-.pf-submit:hover {
-  opacity: 0.85;
+.pf-submit:hover { opacity: 0.88; }
+
+.pf-submit:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 3px;
 }

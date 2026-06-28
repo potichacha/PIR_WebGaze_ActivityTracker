@@ -9,30 +9,36 @@
   <link rel="stylesheet" href="src/linechart/linechart.css" />
   <link rel="stylesheet" href="src/scatterchart/scatterchart.css" />
   <style>
-    :root { --bg:#0f0f1a; --panel:#16213e; --accent:#4ecdc4; --accent2:#6c8cff; --text:#eee; --muted:#9aa6c0; }
+    :root { --bg:#000; --surface:#0d0d0d; --accent:#3B82F6; --text:#F0F0F0; --muted:#9CA3AF; --border:#1F2937; }
     * { box-sizing:border-box; }
     body { margin:0; background:var(--bg); color:var(--text); font-family:'Segoe UI',Arial,sans-serif; }
-    header { padding:14px 22px; display:flex; align-items:center; gap:14px; border-bottom:1px solid rgba(120,140,200,0.18); }
-    header h1 { font-size:1.1rem; margin:0; } header a { color:var(--muted); text-decoration:none; font-size:.85rem; }
-    .bar { padding:12px 22px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; border-bottom:1px solid rgba(120,140,200,.12); }
-    button { background:var(--accent2); color:#fff; border:none; border-radius:8px; padding:9px 15px; cursor:pointer; font-size:.85rem; }
-    button.ghost { background:transparent; border:1px solid rgba(120,140,200,.4); color:var(--text); }
-    button.danger { background:#e74c3c; }
+    :focus-visible { outline:2px solid var(--accent); outline-offset:3px; border-radius:3px; }
+    header { padding:14px 22px; display:flex; align-items:center; gap:14px; border-bottom:1px solid var(--border); }
+    header h1 { font-size:1.1rem; margin:0; }
+    header a { color:var(--muted); text-decoration:none; font-size:.85rem; }
+    header a:hover { color:var(--text); }
+    .bar { padding:12px 22px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; border-bottom:1px solid var(--border); }
+    button { background:var(--accent); color:#000; border:none; border-radius:8px; padding:9px 15px; cursor:pointer; font-size:.85rem; font-weight:600; transition:opacity .15s; }
+    button:hover { opacity:.88; }
+    button.ghost { background:transparent; border:1px solid var(--border); color:var(--text); }
+    button.ghost:hover { border-color:var(--accent); color:var(--accent); opacity:1; }
+    button.danger { background:#1F2937; color:var(--text); }
+    select.ghost { background:transparent; border:1px solid var(--border); color:var(--text); border-radius:8px; padding:8px 10px; font-size:.85rem; cursor:pointer; }
     .wrap { padding:18px 22px; }
     table { width:100%; border-collapse:collapse; font-size:.86rem; }
-    th, td { padding:8px 10px; text-align:left; border-bottom:1px solid rgba(120,140,200,.14); }
+    th, td { padding:8px 10px; text-align:left; border-bottom:1px solid var(--border); }
     th { color:var(--accent); font-weight:600; cursor:default; }
-    tr.sel { background:rgba(108,140,255,.12); }
-    tr.row:hover { background:rgba(120,140,200,.08); cursor:pointer; }
+    tr.sel { background:rgba(59,130,246,.12); }
+    tr.row:hover { background:rgba(59,130,246,.06); cursor:pointer; }
     .muted { color:var(--muted); }
     .empty { color:var(--muted); padding:40px; text-align:center; }
     /* Panneau détail */
     #detail { margin-top:24px; display:none; }
     #detail.on { display:block; }
-    .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px 24px; background:var(--panel); border-radius:12px; padding:16px 20px; font-size:.88rem; }
+    .detail-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px 24px; background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:16px 20px; font-size:.88rem; }
     .detail-grid b { color:var(--accent); }
     .viz-row { display:flex; gap:16px; flex-wrap:wrap; margin-top:18px; }
-    .viz-box { background:#0d1424; border:1px solid rgba(120,140,200,.2); border-radius:12px; padding:12px; }
+    .viz-box { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:12px; }
     .viz-box h3 { margin:0 0 8px; font-size:.92rem; color:var(--accent); }
     #cmp { color:var(--muted); font-size:.82rem; }
   </style>
@@ -46,12 +52,12 @@
 
   <div class="bar">
     <span style="color:var(--muted);font-size:.82rem;">Filtrer :</span>
-    <select id="f-engine" class="ghost" style="padding:8px 10px;border-radius:8px;">
+    <select id="f-engine" class="ghost">
       <option value="">Moteur : tous</option>
       <option value="webgazer">WebGazer</option>
       <option value="mediapipe">MediaPipe</option>
     </select>
-    <select id="f-glasses" class="ghost" style="padding:8px 10px;border-radius:8px;">
+    <select id="f-glasses" class="ghost">
       <option value="">Lunettes : tous</option>
       <option value="non">Sans lunettes</option>
       <option value="lunettes">Lunettes</option>
@@ -62,18 +68,18 @@
     <button id="btn-cmp-sel" class="ghost" disabled>Comparer la sélection (0)</button>
     <button id="btn-cmp-grp" class="ghost">Comparer WebGazer ↔ MediaPipe</button>
     <button id="btn-export" class="ghost">Exporter tout</button>
-    <label class="ghost" style="padding:9px 15px;border:1px solid rgba(120,140,200,.4);border-radius:8px;cursor:pointer;">
+    <label class="ghost" style="padding:9px 15px;border:1px solid var(--border);border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;">
       Importer… <input id="imp" type="file" accept=".json" style="display:none;">
     </label>
     <button id="btn-clear" class="danger">Tout supprimer</button>
   </div>
 
   <!-- Overlay de comparaison -->
-  <div id="cmp-overlay" style="position:fixed;inset:0;z-index:100000;background:#0d1424;color:#eee;display:none;flex-direction:column;font-family:Arial,sans-serif;">
-    <div style="padding:14px 22px;border-bottom:1px solid rgba(120,140,200,.2);display:flex;align-items:center;gap:14px;">
-      <b style="color:#6c8cff;font-size:1.05rem;">Comparaison de sessions</b>
+  <div id="cmp-overlay" style="position:fixed;inset:0;z-index:100000;background:#000;color:#F0F0F0;display:none;flex-direction:column;font-family:'Segoe UI',Arial,sans-serif;">
+    <div style="padding:14px 22px;border-bottom:1px solid #1F2937;display:flex;align-items:center;gap:14px;">
+      <b style="color:#3B82F6;font-size:1.05rem;">Comparaison de sessions</b>
       <span style="flex:1"></span>
-      <button id="cmp-close" style="background:#6c8cff;color:#fff;border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;">Fermer ✕</button>
+      <button id="cmp-close" style="background:#3B82F6;color:#000;border:none;border-radius:8px;padding:9px 16px;font-weight:700;cursor:pointer;">Fermer ✕</button>
     </div>
     <div id="cmp-body" style="flex:1;overflow:auto;padding:22px;"></div>
   </div>
@@ -91,7 +97,7 @@
         </div>
       </div>
       <div class="viz-row">
-        <button id="btn-fullviz" style="background:#6c8cff;font-weight:700;padding:12px 20px;">📊 Voir les 3 pages avec la heatmap (résultats détaillés)</button>
+        <button id="btn-fullviz">📊 Voir les 3 pages avec la heatmap (résultats détaillés)</button>
         <button id="btn-dl-json" class="ghost">Télécharger JSON</button>
         <button id="btn-dl-csv" class="ghost">Télécharger CSV</button>
         <button id="btn-del" class="danger">Supprimer cette session</button>
@@ -114,12 +120,11 @@
   (function () {
     'use strict';
     var _selId = null;
-    var _sortKey = 'start_time', _sortDir = -1; // tri courant
-    var _checked = {};                            // sessions cochées (id → true)
+    var _sortKey = 'start_time', _sortDir = -1;
+    var _checked = {};
 
     function fmt(v, suffix){ return (v==null||v==='') ? '—' : (v + (suffix||'')); }
 
-    // Colonnes triables : clé de tri (dans summary) + libellé.
     var COLS = [
       { key:'start_time',     label:'Date' },
       { key:'participant',    label:'Participant' },
@@ -133,7 +138,6 @@
       { key:'n_saccades',     label:'Sacc' },
     ];
 
-    // Applique filtres + tri et renvoie la liste filtrée/triée.
     function filteredRows() {
       var fe = document.getElementById('f-engine').value;
       var fg = document.getElementById('f-glasses').value;
@@ -159,7 +163,7 @@
       var total = SessionStore.count();
       document.getElementById('count').textContent = rows.length + ' / ' + total + ' session(s)';
       var el = document.getElementById('list');
-      if (!total) { el.innerHTML = '<div class="empty">Aucune session. Lancez une <a href="choose.html" style="color:#4ecdc4">session de test</a>.</div>'; return; }
+      if (!total) { el.innerHTML = '<div class="empty">Aucune session. Lancez une <a href="choose.html" style="color:#3B82F6">session de test</a>.</div>'; return; }
       if (!rows.length) { el.innerHTML = '<div class="empty">Aucune session ne correspond aux filtres.</div>'; return; }
 
       var arrow = function (k) { return _sortKey===k ? (_sortDir<0?' ▼':' ▲') : ''; };
@@ -184,7 +188,6 @@
       });
       html += '</tbody></table>';
       el.innerHTML = html;
-      // Tri au clic sur l'en-tête.
       el.querySelectorAll('th[data-sort]').forEach(function (th) {
         th.addEventListener('click', function () {
           var k = th.getAttribute('data-sort');
@@ -192,14 +195,12 @@
           renderList();
         });
       });
-      // Clic sur une ligne = sélectionner (sauf sur la checkbox).
       el.querySelectorAll('tr.row').forEach(function (tr) {
         tr.addEventListener('click', function (e) {
           if (e.target && e.target.classList.contains('cmp-cb')) return;
           selectSession(tr.getAttribute('data-id'));
         });
       });
-      // Cases à cocher pour la comparaison.
       el.querySelectorAll('.cmp-cb').forEach(function (cb) {
         cb.addEventListener('change', function () {
           var id = cb.getAttribute('data-id');
@@ -239,34 +240,28 @@
       document.getElementById('cmp').textContent = '';
     }
 
-    // Chronologie D3 : fixations (vert), saccades (bleu), stimuli (rouge).
     function drawTimeline(data) {
       var svg = d3.select('#timeline'); svg.selectAll('*').remove();
       var W = document.getElementById('timeline').clientWidth || 600, H = 170;
       var events = (data.events||[]);
-      var inters = (data.interactions||[]).filter(function(i){ return i.type==='stimulus_shown'; });
       var tMax = d3.max(events, function(e){ return e.end_time; }) || 1;
       var tMin = d3.min(events, function(e){ return e.start_time; }) || 0;
-      // Convertir en t_rel via raw si possible, sinon utiliser start/end bruts.
       var x = d3.scaleLinear().domain([tMin, tMax]).range([40, W-20]);
-      // Axe
       svg.append('g').attr('transform','translate(0,'+(H-24)+')')
         .call(d3.axisBottom(x).ticks(6).tickFormat(function(d){ return ((d-tMin)/1000).toFixed(0)+'s'; }))
-        .selectAll('text').style('fill','#9aa6c0');
-      // Stimuli (bandes rouges) — approximées sur la timeline via leur ordre.
+        .selectAll('text').style('fill','#9CA3AF');
       events.forEach(function (e) {
         var y = e.type==='fixation' ? 40 : 80;
-        var col = e.type==='fixation' ? '#27ae60' : '#6c8cff';
+        var col = e.type==='fixation' ? '#3B82F6' : '#374151';
         svg.append('rect')
           .attr('x', x(e.start_time)).attr('y', y)
           .attr('width', Math.max(2, x(e.end_time)-x(e.start_time))).attr('height', 22)
           .attr('rx',3).attr('fill', col).attr('opacity',0.8);
       });
-      svg.append('text').attr('x',6).attr('y',54).style('fill','#27ae60').style('font-size','11px').text('Fix');
-      svg.append('text').attr('x',6).attr('y',94).style('fill','#6c8cff').style('font-size','11px').text('Sacc');
+      svg.append('text').attr('x',6).attr('y',54).style('fill','#3B82F6').style('font-size','11px').text('Fix');
+      svg.append('text').attr('x',6).attr('y',94).style('fill','#374151').style('font-size','11px').text('Sacc');
     }
 
-    // ── Actions ──
     document.getElementById('btn-export').addEventListener('click', function () {
       var blob = new Blob([JSON.stringify(SessionStore.exportAll(), null, 2)], { type:'application/json' });
       var a=document.createElement('a'); a.href=URL.createObjectURL(blob);
@@ -294,7 +289,6 @@
     });
     document.getElementById('btn-dl-csv').addEventListener('click', function () {
       var d=SessionStore.get(_selId); if(!d) return;
-      // Réutilise l'export CSV du logger en réimportant les données.
       var tmp = d; var rows = (tmp.raw_gaze_data||[]);
       var cols=['t_rel_ms','timestamp','x','y','confidence','lux','source_module','test_case_id','target_aoi_id'];
       var out=[cols.join(',')];
@@ -308,23 +302,19 @@
         delete _checked[_selId]; document.getElementById('detail').classList.remove('on'); renderList(); }
     });
 
-    // ── Filtres ──
     document.getElementById('f-engine').addEventListener('change', renderList);
     document.getElementById('f-glasses').addEventListener('change', renderList);
 
-    // ── Comparaison : 2 sessions cochées ──
     document.getElementById('btn-cmp-sel').addEventListener('click', function () {
       var ids = Object.keys(_checked);
       if (ids.length !== 2) return;
       var a = SessionStore.get(ids[0]), b = SessionStore.get(ids[1]);
       var sa = SessionStore.summarize(a), sb = SessionStore.summarize(b);
-      // Label distinct : nom + moteur + date/heure (pour différencier 2 sessions du même nom).
       function lbl(s, sess){ var t=(sess.session&&sess.session.start_time||'').replace('T',' ').slice(5,16);
         return s.participant + ' · ' + (s.engine||'?') + ' · ' + t; }
       showCompare(Compare.compare(a, b, lbl(sa, a), lbl(sb, b)));
     });
 
-    // ── Comparaison : groupe WebGazer ↔ groupe MediaPipe (sur les sessions filtrées) ──
     document.getElementById('btn-cmp-grp').addEventListener('click', function () {
       var rows = filteredRows();
       var wg = rows.filter(function (r){ return r.summary.engine==='webgazer'; }).map(function (r){ return SessionStore.get(r.id); });
@@ -333,7 +323,6 @@
       showCompare(Compare.compare(wg, mp, 'WebGazer (' + wg.length + ')', 'MediaPipe (' + mp.length + ')'));
     });
 
-    // Affiche la comparaison : BILAN écrit en français d'abord, puis le tableau.
     function showCompare(cmp) {
       var ov = document.getElementById('cmp-overlay');
       var body = document.getElementById('cmp-body');
@@ -341,16 +330,13 @@
       function rowByKey(k){ return cmp.rows.find(function(r){ return r.key===k; }); }
       function nameOf(side){ return side==='A' ? cmp.labelA : cmp.labelB; }
 
-      // ── 1. BILAN ÉCRIT (phrases simples) ──
       var aWins = cmp.rows.filter(function(r){return r.better==='A';}).length;
       var bWins = cmp.rows.filter(function(r){return r.better==='B';}).length;
       var winner = aWins===bWins ? null : (aWins>bWins ? 'A' : 'B');
-      var verdictColor = '#6c8cff';
       var verdictTxt = winner==null
         ? '⚖️ Les deux sessions se valent globalement (' + aWins + ' critère(s) gagné(s) chacune).'
         : '🏆 ' + nameOf(winner) + ' est globalement meilleure (' + Math.max(aWins,bWins) + ' critères de qualité sur ' + (aWins+bWins||1) + ').';
 
-      // Phrases détaillées sur les 3 critères clés.
       var phrases = [];
       var cal = rowByKey('calib_px');
       if (cal && cal.a!=null && cal.b!=null) {
@@ -370,38 +356,37 @@
           + Math.max(cf.a,cf.b) + ' contre ' + Math.min(cf.a,cf.b) + ').');
       }
 
-      var html = '<div style="background:#16213e;border-radius:12px;padding:18px 22px;margin-bottom:22px;">'
-        + '<div style="font-size:1.15rem;font-weight:700;color:' + verdictColor + ';margin-bottom:10px;">' + verdictTxt + '</div>'
-        + '<ul style="margin:0;padding-left:20px;line-height:1.9;font-size:.95rem;color:#dfe6f5;">'
+      var html = '<div style="background:#0d0d0d;border:1px solid #1F2937;border-radius:12px;padding:18px 22px;margin-bottom:22px;">'
+        + '<div style="font-size:1.15rem;font-weight:700;color:#3B82F6;margin-bottom:10px;">' + verdictTxt + '</div>'
+        + '<ul style="margin:0;padding-left:20px;line-height:1.9;font-size:.95rem;color:#F0F0F0;">'
         + phrases.map(function(p){ return '<li>' + p + '</li>'; }).join('')
         + '</ul>'
-        + '<div style="margin-top:12px;color:#9aa6c0;font-size:.8rem;">Comparaison sur ' + cmp.nA + ' vs ' + cmp.nB
+        + '<div style="margin-top:12px;color:#9CA3AF;font-size:.8rem;">Comparaison sur ' + cmp.nA + ' vs ' + cmp.nB
         + ' session(s)' + (cmp.nA>1||cmp.nB>1 ? ' (valeurs = moyennes du groupe)' : '') + '.</div>'
         + '</div>';
 
-      // ── 2. TABLEAU DÉTAILLÉ (badges clairs) ──
-      html += '<h3 style="color:#4ecdc4;margin:0 0 8px;">Détail par métrique</h3>'
+      html += '<h3 style="color:#3B82F6;margin:0 0 8px;">Détail par métrique</h3>'
         + '<table style="width:100%;border-collapse:collapse;font-size:.92rem;">'
-        + '<thead><tr style="color:#4ecdc4;text-align:left;">'
-        + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">Métrique</th>'
-        + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">' + cmp.labelA + '</th>'
-        + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">' + cmp.labelB + '</th>'
-        + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">Écart</th>'
-        + '<th style="padding:10px 12px;border-bottom:1px solid rgba(120,140,200,.25);">Gagnant</th>'
+        + '<thead><tr style="color:#3B82F6;text-align:left;">'
+        + '<th style="padding:10px 12px;border-bottom:1px solid #1F2937;">Métrique</th>'
+        + '<th style="padding:10px 12px;border-bottom:1px solid #1F2937;">' + cmp.labelA + '</th>'
+        + '<th style="padding:10px 12px;border-bottom:1px solid #1F2937;">' + cmp.labelB + '</th>'
+        + '<th style="padding:10px 12px;border-bottom:1px solid #1F2937;">Écart</th>'
+        + '<th style="padding:10px 12px;border-bottom:1px solid #1F2937;">Gagnant</th>'
         + '</tr></thead><tbody>';
       cmp.rows.forEach(function (r) {
-        var aCol = r.better==='A' ? 'color:#27ae60;font-weight:700;' : '';
-        var bCol = r.better==='B' ? 'color:#27ae60;font-weight:700;' : '';
+        var aCol = r.better==='A' ? 'color:#3B82F6;font-weight:700;' : '';
+        var bCol = r.better==='B' ? 'color:#3B82F6;font-weight:700;' : '';
         var badge;
-        if (r.better==='A') badge = '<span style="background:#27ae60;color:#fff;padding:2px 9px;border-radius:999px;font-size:.78rem;">' + cmp.labelA + '</span>';
-        else if (r.better==='B') badge = '<span style="background:#27ae60;color:#fff;padding:2px 9px;border-radius:999px;font-size:.78rem;">' + cmp.labelB + '</span>';
-        else badge = '<span style="color:#9aa6c0;">égalité</span>';
+        if (r.better==='A') badge = '<span style="background:#3B82F6;color:#000;padding:2px 9px;border-radius:999px;font-size:.78rem;">' + cmp.labelA + '</span>';
+        else if (r.better==='B') badge = '<span style="background:#3B82F6;color:#000;padding:2px 9px;border-radius:999px;font-size:.78rem;">' + cmp.labelB + '</span>';
+        else badge = '<span style="color:#9CA3AF;">égalité</span>';
         html += '<tr>'
-          + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);">' + r.label + (r.lowerBetter===true?' <span style="color:#9aa6c0;">(bas = mieux)</span>':r.lowerBetter===false?' <span style="color:#9aa6c0;">(haut = mieux)</span>':'') + '</td>'
-          + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);' + aCol + '">' + cell(r.a, r.unit) + '</td>'
-          + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);' + bCol + '">' + cell(r.b, r.unit) + '</td>'
-          + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);color:#9aa6c0;">' + (r.diff==null?'—':(r.diff>0?'+':'')+r.diff+(r.unit?(' '+r.unit):'')) + '</td>'
-          + '<td style="padding:8px 12px;border-bottom:1px solid rgba(120,140,200,.1);">' + badge + '</td>'
+          + '<td style="padding:8px 12px;border-bottom:1px solid #111827;">' + r.label + (r.lowerBetter===true?' <span style="color:#9CA3AF;">(bas = mieux)</span>':r.lowerBetter===false?' <span style="color:#9CA3AF;">(haut = mieux)</span>':'') + '</td>'
+          + '<td style="padding:8px 12px;border-bottom:1px solid #111827;' + aCol + '">' + cell(r.a, r.unit) + '</td>'
+          + '<td style="padding:8px 12px;border-bottom:1px solid #111827;' + bCol + '">' + cell(r.b, r.unit) + '</td>'
+          + '<td style="padding:8px 12px;border-bottom:1px solid #111827;color:#9CA3AF;">' + (r.diff==null?'—':(r.diff>0?'+':'')+r.diff+(r.unit?(' '+r.unit):'')) + '</td>'
+          + '<td style="padding:8px 12px;border-bottom:1px solid #111827;">' + badge + '</td>'
           + '</tr>';
       });
       html += '</tbody></table>';
