@@ -116,6 +116,7 @@
 
   <!-- Modules partagés (logique d'analyse indépendante du moteur) -->
   <script src="src/calibration/calibration.js?v=mp"></script>
+  <script src="src/participant-form/participant-form.js?v=1"></script>
   <script src="src/logger/gaze-logger.js?v=3"></script>
   <script src="src/session-store/session-store.js?v=3"></script>
   <script src="src/gaze-viz/gaze-viz.js?v=3"></script>
@@ -250,44 +251,10 @@
       }
     }
 
-    // ── Formulaire participant (overlay) ──
+    // ── Formulaire participant — délégué au module partagé ParticipantForm ──
     function showParticipantForm(onDone) {
-      overlay.classList.add('on');
-      document.getElementById('mp-h').textContent = 'Informations participant';
-      document.getElementById('mp-sub').textContent = 'Remplissez avant de commencer';
-      var box = document.createElement('div');
-      box.className = 'mp-form';
-      box.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);'
-        + 'background:#16213e;border-radius:14px;padding:28px 34px;width:90%;max-width:460px;color:#eee;';
-      var inp = 'width:100%;background:#0d1b2a;border:1px solid #2c3e50;border-radius:8px;color:#eee;padding:9px 12px;margin-bottom:14px;box-sizing:border-box;';
-      box.innerHTML =
-        '<h3 style="margin:0 0 18px;color:#6c8cff;">Session — données participant</h3>'
-        + '<label style="font-size:.82rem;color:#9aa6c0;">Prénom *</label>'
-        + '<input id="f-first" placeholder="Prénom" style="' + inp + '" />'
-        + '<label style="font-size:.82rem;color:#9aa6c0;">Nom *</label>'
-        + '<input id="f-last" placeholder="Nom" style="' + inp + '" />'
-        + '<label style="font-size:.82rem;color:#9aa6c0;">Lunettes / lentilles</label>'
-        + '<select id="f-glasses" style="' + inp + '"><option value="non">Non</option>'
-        + '<option value="lunettes">Lunettes</option><option value="lentilles">Lentilles</option></select>'
-        + '<div id="f-err" style="color:#e74c3c;font-size:.82rem;margin-bottom:10px;display:none;">Prénom et nom obligatoires.</div>'
-        + '<button id="f-go" style="background:#6c8cff;color:#fff;border:none;border-radius:8px;padding:11px 18px;font-weight:700;width:100%;cursor:pointer;">Continuer →</button>';
-      overlay.appendChild(box);
-      document.getElementById('f-go').addEventListener('click', function () {
-        var first = document.getElementById('f-first').value.trim();
-        var last  = document.getElementById('f-last').value.trim();
-        if (!first || !last) { document.getElementById('f-err').style.display = 'block'; return; }
-        var session = {
-          first_name: first,
-          last_name: last,
-          participant_id: (first[0] + last).toLowerCase().replace(/[^a-z0-9]/g, ''),
-          date: new Date().toISOString().slice(0,10),
-          glasses: document.getElementById('f-glasses').value,
-          engine: 'mediapipe',
-          screen_resolution: (typeof screen !== 'undefined') ? screen.width + 'x' + screen.height : null,
-        };
-        box.remove(); overlay.classList.remove('on');
-        onDone(session);
-      });
+      var lux = (window.AmbientLight && typeof AmbientLight.getLux === 'function') ? AmbientLight.getLux() : null;
+      ParticipantForm.show({ accentColor: '#6c8cff', engine: 'mediapipe', lux: lux, onDone: onDone });
     }
 
     // ── Écran de positionnement avec retour caméra + feedback de distance ────────
@@ -715,8 +682,10 @@
       var pid = (_session && _session.participant_id) || 'participant-mediapipe';
       var calScore = stored && stored.meta ? { mean_error_px: stored.meta.meanError, std_error_px: stored.meta.stdError || null } : null;
       window.GazeLogger.init(pid, calScore, {
-        first_name: _session && _session.first_name, last_name: _session && _session.last_name,
-        glasses: _session && _session.glasses, engine: 'mediapipe',
+        glasses:      _session && _session.glasses,
+        lighting:     _session && _session.lighting,
+        lux_measured: _session && _session.lux_measured,
+        engine:       'mediapipe',
       });
       GazeLogger.setModule('mediapipe');
       GazeLogger.logInteraction('test_session_start', { participant: _session || null });
@@ -900,10 +869,10 @@
       var pid = (_session && _session.participant_id) || 'participant-mediapipe';
       var calScore = stored && stored.meta ? { mean_error_px: stored.meta.meanError, std_error_px: stored.meta.stdError || null } : null;
       window.GazeLogger.init(pid, calScore, {
-        first_name: _session && _session.first_name,
-        last_name:  _session && _session.last_name,
-        glasses:    _session && _session.glasses,
-        engine:     'mediapipe',
+        glasses:      _session && _session.glasses,
+        lighting:     _session && _session.lighting,
+        lux_measured: _session && _session.lux_measured,
+        engine:       'mediapipe',
       });
       GazeLogger.setModule('mediapipe');
       GazeLogger.logInteraction('session_start', { engine: 'mediapipe', participant: _session || null, source_module: 'mediapipe' });
