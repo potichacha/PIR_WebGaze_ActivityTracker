@@ -171,6 +171,11 @@ pollue l'entraînement, et la contrainte explicite de résolution caméra.
 La \textbf{qualité de calibration} est le principal point faible du suivi du regard par
 webcam~; un effort particulier lui a donc été consacré.
 
+\paragraph{Note de méthode.} Cette section (calibration et précision) a été conçue en
+nous appuyant sur des \textbf{recherches bibliographiques} et sur l'aide d'une
+\textbf{intelligence artificielle} pour choisir et mettre au point les méthodes
+mathématiques. Les autres parties du rapport ne reposent pas sur ces outils.
+
 \subsection{Procédure}
 
 On affiche une grille de \textbf{25 points} ($5\times5$, plus serrée sur les bords).
@@ -443,83 +448,11 @@ stimulus (cercle rouge) est journalisée avec chaque point de regard. Le score d
 cible est la moyenne, sur ses points, d'une fonction de proximité valant 100\,\% si
 le regard est dans un rayon serré autour du centre et décroissant continûment avec
 la distance — bien plus informatif qu'un simple « dans/hors de l'AOI ».
-
-% ═════════════════════════════════════════════════════════════════════════════
-\section{Démarche de développement (historique itératif)}
-\label{sec:demarche}
-
-Le prototype a été construit de manière \textbf{itérative et incrémentale}, chaque
-incrément livrant une fonctionnalité testée avant d'être intégrée. Le projet a été
-suivi sous Git par trois contributeurs sur deux jalons temporels (avril, puis juin)~;
-l'historique des commits permet de retracer la progression. Le tableau~\ref{tab:phases}
-résume les six phases dégagées de cet historique.
-
-\begin{table}[h]
-\centering
-\renewcommand{\arraystretch}{1.2}
-\footnotesize
-\begin{tabular}{>{\raggedright\arraybackslash}p{2.4cm} >{\raggedright\arraybackslash}p{1.5cm} >{\raggedright\arraybackslash}p{8.6cm}}
-\toprule
-\textbf{Phase} & \textbf{Période} & \textbf{Apports principaux (commits)} \\
-\midrule
-P1 : Calibration de base & 27--28 avr. &
-Module \code{Calibration} et page dédiée, stabilisation/agrandissement du curseur,
-grille de 25 points, mode animé, première détection I-DT, correction de biais,
-formulaire participant et module \code{GazeCapture}, cinq améliorations
-post-WebGazer~[A--E]. \\
-\addlinespace
-P2 : Lissage \& événements & 29 avr. &
-Pipeline de lissage temps réel complet puis simplification décisive~: remplacement
-d'un empilement de neuf filtres par \textbf{One~Euro seul} (suppression du lag et de
-l'imprécision à droite)~; détection des \textbf{saccades}. \\
-\addlinespace
-P3 : Intégration single-page \& logging & 30 avr. &
-Fiabilisation du pipeline (un seul \code{begin()}, persistance du modèle avant
-navigation), fusion calibration~+~démo dans \code{index.html}, aperçu webcam au
-chargement pour l'alignement du visage, infobulle AOI immédiate, \textbf{module
-\code{GazeLogger}}, post-traitement et premier export JSON~; visualisations
-\emph{bar}, \emph{line}, \emph{scatter}. \\
-\addlinespace
-P4 : Précision avancée \& livrables & 22 juin &
-\textbf{Correction spatiale unique} (fin de la sur-correction), validation
-\textbf{leave-one-out}, compensation des mouvements de tête, lissage runtime~;
-journalisation \textbf{multimodale}, export \textbf{JSON-LD}, \textbf{JSON Schema},
-jeux de données et première version du \textbf{rapport \LaTeX{}}. \\
-\addlinespace
-P5 : Second moteur MediaPipe & 22--24 juin &
-Intégration du moteur \textbf{MediaPipe FaceLandmarker} et chaîne de régression
-caractéristiques$\to$écran, puis améliorations~; calibration en poursuite
-(10 clics/point, score continu par distance à la cible)~; \textbf{scénario de test
-automatique} commun aux deux moteurs, résultats structurés, badge moteur et
-\emph{session store}. \\
-\addlinespace
-P6 : Visualiseur \& UX finale & 24--26 juin &
-\textbf{Visualiseur de sessions} (tri, filtres, sélection multiple, comparaison de
-2 sessions ou de groupes WebGazer/MediaPipe)~; \textbf{page d'accueil}
-\code{choose.html} pour le choix du moteur. \\
-\bottomrule
-\end{tabular}
-\caption{Phases de développement dégagées.}
-\label{tab:phases}
-\end{table}
-
-\paragraph{Enseignements méthodologiques.} Deux décisions illustrent la valeur de
-l'approche itérative. D'abord la \textbf{simplification du lissage} (P2)~: un pipeline
-sophistiqué de neuf filtres dégradait en réalité la latence et la précision~; le revenir
-à un unique filtre One~Euro a amélioré le résultat, ce qui confirme qu'un test empirique
-prime sur la complexité \emph{a priori}. Ensuite la \textbf{correction de la
-sur-correction spatiale} (P4)~: l'observation que deux estimateurs chaînés (IDW puis
-LOWESS) modélisaient le même champ d'erreur a conduit à n'en garder qu'un seul
-(§\ref{sec:demarche} et §4.2). Enfin, l'ajout tardif du \textbf{second moteur} (P5) a
-été rendu possible par le découplage \emph{capture / post-traitement / journal}~: les
-deux moteurs partagent la même chaîne aval, ce qui valide a posteriori le choix
-d'architecture modulaire de la phase P1.
-
 % ═════════════════════════════════════════════════════════════════════════════
 \section{Validation logicielle}
 
 La logique métier (algorithmes I-DT/I-VT, filtres, correction spatiale, format de
-log) est couverte par \textbf{506 tests unitaires} automatisés (Node, sans webcam),
+log) est couverte par des \textbf{tests unitaires} automatisés (Node, sans webcam),
 exécutables par \code{npm test}. Ils vérifient notamment~: la correction unique
 (non sur-corrigée), la validation leave-one-out, le lissage One Euro, la robustesse
 des détecteurs sur cas limites, et la performance ($<$50\,ms sur 10\,000 points).
