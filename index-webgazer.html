@@ -124,15 +124,24 @@
 
     /* ── Dialogue de positionnement ─────────────────────────────────────────── */
     .wg-modal-overlay {
-      position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 9999;
-      display: flex; align-items: center; justify-content: center; font-family: inherit;
+      position: fixed; inset: 0; background: rgba(0,0,0,.82); z-index: 9999;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; font-family: inherit; gap: 18px;
     }
-    .wg-pos-card {
-      background: #16213e; border-radius: 14px; padding: 30px 36px; color: #eee;
-      text-align: center; max-width: 420px; box-shadow: 0 20px 50px rgba(0,0,0,.55);
+    .wg-pos-title { margin: 0 0 4px; color: #4ecdc4; font-size: 1.1rem; text-align: center; }
+    .wg-pos-hint  { color: #9aa6c0; margin: 0 0 14px; line-height: 1.65; font-size: .88rem;
+                    text-align: center; max-width: 380px; }
+    /* Wrapper du retour vidéo WebGazer agrandi centré */
+    .wg-pos-video-wrap {
+      position: relative; width: 320px; height: 240px;
     }
-    .wg-pos-title { margin: 0 0 12px; color: #4ecdc4; font-size: 1.1rem; }
-    .wg-pos-hint  { color: #9aa6c0; margin: 0 0 18px; line-height: 1.65; font-size: .92rem; }
+    /* Ovale guide par-dessus la vidéo */
+    .wg-pos-oval {
+      position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+      width: 130px; height: 170px; border-radius: 50%;
+      border: 3px dashed #e74c3c; pointer-events: none;
+      transition: border-color .3s, box-shadow .3s;
+    }
     .wg-pos-btn {
       background: #4ecdc4; color: #0f0f1a; border: none;
       border-radius: 8px; padding: 12px 26px; font-weight: 700;
@@ -334,45 +343,77 @@
 
   // ── Positionnement ───────────────────────────────────────────────────────────
   function _showPositioning() {
+    var wgCnt = document.getElementById('webgazerVideoContainer');
+
+    // Agrandir et centrer le container vidéo WebGazer pour le positionnement
+    var _origStyle = wgCnt ? wgCnt.getAttribute('style') || '' : '';
+    if (wgCnt) {
+      wgCnt.style.cssText =
+        'position:fixed !important; width:320px !important; height:240px !important;'
+        + 'left:50% !important; top:50% !important; bottom:auto !important; right:auto !important;'
+        + 'transform:translate(-50%,-50%) !important;'
+        + 'border-radius:12px; border:3px solid #4ecdc4;'
+        + 'box-shadow:0 0 40px rgba(78,205,196,.25); z-index:10000;';
+      // Agrandir aussi le feed vidéo interne
+      ['webgazerVideoFeed','webgazerFaceOverlay','webgazerFaceFeedbackBox'].forEach(function (id) {
+        var el = document.getElementById(id);
+        if (el) { el.style.width = '320px'; el.style.height = '240px'; }
+      });
+    }
+
     var overlay = document.createElement('div');
     overlay.classList.add('wg-modal-overlay');
 
-    var card = document.createElement('div');
-    card.classList.add('wg-pos-card');
+    // Ovale guide par-dessus la vidéo (affiché en position fixe centrée)
+    var ovalWrap = document.createElement('div');
+    ovalWrap.className = 'wg-pos-video-wrap';
+    var oval = document.createElement('div');
+    oval.className = 'wg-pos-oval';
+    ovalWrap.appendChild(oval);
 
     var h3 = document.createElement('h3');
     h3.className = 'wg-pos-title';
     h3.textContent = 'Positionnement';
-    card.appendChild(h3);
 
     var p = document.createElement('p');
     p.className = 'wg-pos-hint';
-    p.appendChild(document.createTextNode('Placez-vous à '));
-    var strong1 = document.createElement('strong');
-    strong1.textContent = '~60 cm';
-    p.appendChild(strong1);
-    p.appendChild(document.createTextNode(
-      ' de l\'écran, visage bien éclairé et centré face à la caméra.'
-    ));
-    p.appendChild(document.createElement('br'));
-    p.appendChild(document.createElement('br'));
-    p.appendChild(document.createTextNode(
-      'Le retour vidéo WebGazer (en bas à gauche) confirme la détection du visage. '
-      + 'L\'ovale facial doit être vert avant de continuer.'
-    ));
-    card.appendChild(p);
+    p.innerHTML =
+      'Placez-vous à <strong>~60 cm</strong> de l\'écran, visage centré dans l\'ovale.<br>'
+      + 'L\'ovale devient vert quand WebGazer détecte bien votre visage.';
 
     var goBtn = document.createElement('button');
     goBtn.id = 'pos-go';
     goBtn.className = 'wg-pos-btn';
     goBtn.textContent = 'Je suis prêt — Calibrer →';
-    card.appendChild(goBtn);
 
-    overlay.appendChild(card);
+    overlay.appendChild(h3);
+    overlay.appendChild(ovalWrap);   // l'ovale flotte sur la vidéo WebGazer en dessous
+    overlay.appendChild(p);
+    overlay.appendChild(goBtn);
     document.body.appendChild(overlay);
 
+    // Colorer l'ovale selon la détection WebGazer
+    var _ovalIv = setInterval(function () {
+      var gazeRecent = _gazeOn && (Date.now() - _gazeLastMs < 1500);
+      oval.style.borderColor = gazeRecent ? '#27ae60' : '#e74c3c';
+      oval.style.boxShadow   = gazeRecent ? '0 0 14px 4px rgba(39,174,96,.45)' : '';
+    }, 400);
+
     goBtn.addEventListener('click', function () {
+      clearInterval(_ovalIv);
       overlay.remove();
+      // Remettre le container vidéo en bas-gauche (taille normale)
+      if (wgCnt) {
+        wgCnt.style.cssText = _origStyle
+          + 'position:fixed !important; bottom:14px !important; left:14px !important;'
+          + 'top:auto !important; right:auto !important; transform:none !important;'
+          + 'width:160px !important; height:120px !important;'
+          + 'border-radius:8px; border:2px solid rgba(78,205,196,.45);';
+        ['webgazerVideoFeed','webgazerFaceOverlay','webgazerFaceFeedbackBox'].forEach(function (id) {
+          var el = document.getElementById(id);
+          if (el) { el.style.width = '160px'; el.style.height = '120px'; }
+        });
+      }
       _runCalibration();
     });
   }

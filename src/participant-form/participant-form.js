@@ -242,9 +242,10 @@
     focusFirstField();
 
     function submit() {
+      var data = collectData(id, engine, luxHint);
       overlay.remove();
       if (opts.onDone) {
-        opts.onDone(collectData(id, engine, luxHint));
+        opts.onDone(data);
       }
     }
 
