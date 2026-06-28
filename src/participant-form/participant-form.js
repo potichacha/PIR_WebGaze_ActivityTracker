@@ -1,141 +1,258 @@
 /**
- * participant-form.js — Formulaire participant partagé entre les deux moteurs.
+ * participant-form.js
  *
- * Champs : correction visuelle + luminosité ambiante (auto-renseignée si disponible).
- * Aucun nom ni prénom. L'ID est généré, affiché en grand, et noté par le participant.
+ * Formulaire participant partagé entre les deux moteurs de suivi du regard.
+ * Il ne demande aucun nom ni prénom : un identifiant est généré automatiquement,
+ * affiché en grand pour que le participant le note, puis renvoyé à l'appelant.
  *
- * API :
+ * Les champs collectés sont la correction visuelle et la luminosité ambiante
+ * (pré-remplie lorsqu'une mesure en lux est fournie).
+ *
+ * Structure HTML : le module clone l'élément <template id="pf-modal"> présent
+ * dans la page hôte. Les valeurs dynamiques (couleur d'accent, identifiant,
+ * moteur, mesure en lux) sont injectées via textContent et la propriété CSS
+ * personnalisée --pf-accent — aucune chaîne HTML n'est construite en JS.
+ * Les styles statiques proviennent de participant-form.css.
+ *
+ * API publique :
  *   ParticipantForm.show(opts)
  *     opts.accentColor  {string}    couleur d'accent CSS (défaut '#4ecdc4')
  *     opts.engine       {string}    'webgazer' | 'mediapipe'
- *     opts.lux          {number}    luminosité mesurée (lux) — pré-remplit le champ
+ *     opts.lux          {number}    luminosité mesurée (lux), pré-remplit l'info
  *     opts.onDone       {function}  callback(data)
  *
- *   data retourné :
- *     { participant_id, glasses, lighting, date, engine, screen_resolution }
+ *   data renvoyé :
+ *     { participant_id, glasses, lighting, lux_measured, date, engine, screen_resolution }
  */
 (function (global) {
   'use strict';
 
-  var _INP =
-    'width:100%;background:#0d1b2a;border:1px solid #2c3e50;border-radius:8px;color:#eee;'
-    + 'padding:9px 12px;box-sizing:border-box;font-size:.93rem;outline:none;font-family:inherit;'
-    + 'transition:border-color .2s;';
+  function padTwoDigits(value) {
+    return ('0' + value).slice(-2);
+  }
 
-  function _genId() {
+  function todayCompact() {
     var now = new Date();
-    var d = now.getFullYear().toString()
-      + ('0' + (now.getMonth() + 1)).slice(-2)
-      + ('0' + now.getDate()).slice(-2);
-    // 6 chars alphanumériques pour garantir l'unicité en session de labo
-    var rand = '';
-    while (rand.length < 6) rand += Math.random().toString(36).slice(2).toUpperCase();
-    return 'P-' + d + '-' + rand.slice(0, 6);
+    return now.getFullYear().toString()
+      + padTwoDigits(now.getMonth() + 1)
+      + padTwoDigits(now.getDate());
+  }
+
+  function randomSuffix() {
+    var suffix = '';
+    while (suffix.length < 6) {
+      suffix += Math.random().toString(36).slice(2).toUpperCase();
+    }
+    return suffix.slice(0, 6);
+  }
+
+  function generateId() {
+    return 'P-' + todayCompact() + '-' + randomSuffix();
+  }
+
+  function roundedLuxHint(opts) {
+    if (opts.lux == null) {
+      return null;
+    }
+    return Math.round(opts.lux);
+  }
+
+  function screenResolution() {
+    if (typeof screen === 'undefined') {
+      return null;
+    }
+    return screen.width + 'x' + screen.height;
+  }
+
+  function buildOverlayFromTemplate(id, accent, engine, luxHint) {
+    var tmpl = document.getElementById('pf-modal');
+    var overlay = tmpl.content.cloneNode(true).firstElementChild;
+
+    overlay.style.setProperty('--pf-accent', accent);
+
+    overlay.querySelector('#pf-id-display').textContent = id;
+
+    var badge = overlay.querySelector('.pf-engine-badge');
+    if (engine) {
+      badge.textContent = engine;
+    } else {
+      badge.style.display = 'none';
+    }
+
+    var luxNote = overlay.querySelector('.pf-lux-note');
+    if (luxHint != null) {
+      luxNote.textContent = '(mesurée : ' + luxHint + ' lux)';
+    } else {
+      luxNote.style.display = 'none';
+    }
+
+    return overlay;
+  }
+
+  function buildOverlayFromDOM(id, accent, engine, luxHint) {
+    var overlay = document.createElement('div');
+    overlay.id = 'pf-overlay';
+    overlay.style.setProperty('--pf-accent', accent);
+
+    var card = document.createElement('div');
+    card.className = 'pf-card';
+
+    var title = document.createElement('h3');
+    title.className = 'pf-title';
+
+    var titleText = document.createElement('span');
+    titleText.className = 'pf-title-text';
+    titleText.textContent = 'Informations participant';
+    title.appendChild(titleText);
+
+    if (engine) {
+      var badge = document.createElement('span');
+      badge.className = 'pf-engine-badge';
+      badge.textContent = engine;
+      title.appendChild(badge);
+    }
+
+    var hint = document.createElement('p');
+    hint.className = 'pf-hint';
+    hint.textContent = 'Notez votre identifiant avant de continuer — il sera utilisé pour retrouver vos données.';
+
+    var idBox = document.createElement('div');
+    idBox.className = 'pf-id-box';
+
+    var idLabel = document.createElement('div');
+    idLabel.className = 'pf-id-label';
+    idLabel.textContent = 'Votre identifiant';
+
+    var idDisplay = document.createElement('div');
+    idDisplay.id = 'pf-id-display';
+    idDisplay.textContent = id;
+
+    idBox.appendChild(idLabel);
+    idBox.appendChild(idDisplay);
+
+    var glassesField = document.createElement('div');
+    glassesField.className = 'pf-field';
+
+    var glassesLabel = document.createElement('label');
+    glassesLabel.className = 'pf-label';
+    glassesLabel.htmlFor = 'pf-glasses';
+    glassesLabel.textContent = 'Correction visuelle';
+
+    var glassesSelect = document.createElement('select');
+    glassesSelect.id = 'pf-glasses';
+    glassesSelect.className = 'pf-select';
+    [['non', 'Aucune'], ['lunettes', 'Lunettes'], ['lentilles', 'Lentilles']].forEach(function (pair) {
+      var opt = document.createElement('option');
+      opt.value = pair[0];
+      opt.textContent = pair[1];
+      glassesSelect.appendChild(opt);
+    });
+
+    glassesField.appendChild(glassesLabel);
+    glassesField.appendChild(glassesSelect);
+
+    var lightingField = document.createElement('div');
+    lightingField.className = 'pf-field pf-field--last';
+
+    var lightingLabel = document.createElement('label');
+    lightingLabel.className = 'pf-label';
+    lightingLabel.htmlFor = 'pf-lighting';
+    lightingLabel.textContent = 'Luminosité ambiante';
+
+    if (luxHint != null) {
+      var luxNote = document.createElement('span');
+      luxNote.className = 'pf-lux-note';
+      luxNote.textContent = ' (mesurée : ' + luxHint + ' lux)';
+      lightingLabel.appendChild(luxNote);
+    }
+
+    var lightingSelect = document.createElement('select');
+    lightingSelect.id = 'pf-lighting';
+    lightingSelect.className = 'pf-select';
+    [
+      ['faible',   'Faible — store fermé / lampe de bureau'],
+      ['normale',  'Normale — bureau éclairé'],
+      ['forte',    'Forte — lumière naturelle directe'],
+    ].forEach(function (pair, i) {
+      var opt = document.createElement('option');
+      opt.value = pair[0];
+      opt.textContent = pair[1];
+      if (i === 1) {
+        opt.selected = true;
+      }
+      lightingSelect.appendChild(opt);
+    });
+
+    lightingField.appendChild(lightingLabel);
+    lightingField.appendChild(lightingSelect);
+
+    var submit = document.createElement('button');
+    submit.id = 'pf-go';
+    submit.className = 'pf-submit';
+    submit.textContent = 'Commencer →';
+
+    card.appendChild(title);
+    card.appendChild(hint);
+    card.appendChild(idBox);
+    card.appendChild(glassesField);
+    card.appendChild(lightingField);
+    card.appendChild(submit);
+    overlay.appendChild(card);
+
+    return overlay;
+  }
+
+  function createOverlay(id, accent, engine, luxHint) {
+    if (typeof document !== 'undefined' && document.getElementById('pf-modal')) {
+      return buildOverlayFromTemplate(id, accent, engine, luxHint);
+    }
+    return buildOverlayFromDOM(id, accent, engine, luxHint);
+  }
+
+  function focusFirstField() {
+    setTimeout(function () {
+      var el = document.getElementById('pf-glasses');
+      if (el) {
+        el.focus();
+      }
+    }, 60);
+  }
+
+  function collectData(id, engine, luxHint) {
+    return {
+      participant_id:    id,
+      glasses:           document.getElementById('pf-glasses').value,
+      lighting:          document.getElementById('pf-lighting').value,
+      lux_measured:      luxHint,
+      date:              new Date().toISOString().slice(0, 10),
+      engine:            engine || null,
+      screen_resolution: screenResolution(),
+    };
   }
 
   function show(opts) {
     opts = opts || {};
     var accent = opts.accentColor || '#4ecdc4';
     var engine = opts.engine || null;
-    var luxHint = (opts.lux != null) ? Math.round(opts.lux) : null;
-    var id = _genId();
+    var luxHint = roundedLuxHint(opts);
+    var id = generateId();
 
-    var engineBadge = engine
-      ? '<span style="font-size:.72rem;background:rgba(78,205,196,.12);border:1px solid rgba(78,205,196,.2);'
-        + 'border-radius:999px;padding:2px 10px;color:' + accent + ';margin-left:8px;font-weight:600;">'
-        + engine + '</span>'
-      : '';
-
-    var overlay = document.createElement('div');
-    overlay.id = 'pf-overlay';
-    overlay.style.cssText =
-      'position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:99000;'
-      + 'display:flex;align-items:center;justify-content:center;'
-      + 'font-family:"Segoe UI",Arial,sans-serif;';
-
-    overlay.innerHTML =
-      '<div style="background:#16213e;border-radius:16px;padding:32px 36px;width:90%;max-width:420px;'
-      + 'color:#eee;box-shadow:0 20px 60px rgba(0,0,0,.6);">'
-
-      // En-tête
-      + '<h3 style="margin:0 0 4px;font-size:1.1rem;display:flex;align-items:center;">'
-      + '<span style="color:' + accent + ';">Informations participant</span>' + engineBadge
-      + '</h3>'
-      + '<p style="margin:0 0 20px;color:#9aa6c0;font-size:.81rem;line-height:1.5;">'
-      + 'Notez votre identifiant avant de continuer — il sera utilisé pour retrouver vos données.</p>'
-
-      // ID — affiché en grand, copier visuellement
-      + '<div style="background:#0a1628;border:2px solid ' + accent + ';border-radius:10px;'
-      + 'padding:14px 18px;margin-bottom:22px;text-align:center;">'
-      + '<div style="font-size:.72rem;color:#9aa6c0;margin-bottom:4px;letter-spacing:.05em;text-transform:uppercase;">Votre identifiant</div>'
-      + '<div id="pf-id-display" style="font-family:monospace;font-size:1.55rem;color:' + accent + ';'
-      + 'font-weight:800;letter-spacing:.12em;">' + id + '</div>'
-      + '</div>'
-
-      // Correction visuelle
-      + '<div style="margin-bottom:14px;">'
-      + '<label style="display:block;font-size:.8rem;color:#9aa6c0;margin-bottom:5px;">Correction visuelle</label>'
-      + '<select id="pf-glasses" style="' + _INP + '">'
-      + '<option value="non">Aucune</option>'
-      + '<option value="lunettes">Lunettes</option>'
-      + '<option value="lentilles">Lentilles</option>'
-      + '</select>'
-      + '</div>'
-
-      // Luminosité
-      + '<div style="margin-bottom:22px;">'
-      + '<label style="display:block;font-size:.8rem;color:#9aa6c0;margin-bottom:5px;">'
-      + 'Luminosité ambiante'
-      + (luxHint != null ? ' <span style="color:' + accent + ';font-size:.75rem;">(mesurée : ' + luxHint + ' lux)</span>' : '')
-      + '</label>'
-      + '<select id="pf-lighting" style="' + _INP + '">'
-      + '<option value="faible">Faible — store fermé / lampe de bureau</option>'
-      + '<option value="normale" selected>Normale — bureau éclairé</option>'
-      + '<option value="forte">Forte — lumière naturelle directe</option>'
-      + '</select>'
-      + '</div>'
-
-      // Bouton
-      + '<button id="pf-go" style="width:100%;background:' + accent + ';color:#0f0f1a;border:none;'
-      + 'border-radius:8px;padding:12px;font-weight:700;font-size:.98rem;cursor:pointer;'
-      + 'transition:opacity .15s;">Commencer →</button>'
-
-      + '</div>';
-
+    var overlay = createOverlay(id, accent, engine, luxHint);
     document.body.appendChild(overlay);
+    focusFirstField();
 
-    setTimeout(function () {
-      var el = document.getElementById('pf-glasses');
-      if (el) el.focus();
-    }, 60);
-
-    function _submit() {
+    function submit() {
       overlay.remove();
       if (opts.onDone) {
-        opts.onDone({
-          participant_id:    id,
-          glasses:           document.getElementById('pf-glasses').value,
-          lighting:          document.getElementById('pf-lighting').value,
-          lux_measured:      luxHint,
-          date:              new Date().toISOString().slice(0, 10),
-          engine:            engine || null,
-          screen_resolution: (typeof screen !== 'undefined')
-            ? screen.width + 'x' + screen.height : null,
-        });
+        opts.onDone(collectData(id, engine, luxHint));
       }
     }
 
-    document.getElementById('pf-go').addEventListener('click', _submit);
-
+    document.getElementById('pf-go').addEventListener('click', submit);
     overlay.addEventListener('keydown', function (e) {
-      if (e.key === 'Enter') _submit();
-    });
-
-    ['pf-glasses', 'pf-lighting'].forEach(function (fid) {
-      var el = document.getElementById(fid);
-      if (!el) return;
-      el.addEventListener('focus', function () { this.style.borderColor = accent; });
-      el.addEventListener('blur',  function () { this.style.borderColor = '#2c3e50'; });
+      if (e.key === 'Enter') {
+        submit();
+      }
     });
   }
 

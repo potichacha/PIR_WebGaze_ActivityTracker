@@ -1,0 +1,66 @@
+/**
+ * gaze-viz.css
+ *
+ * Overlay plein écran de visualisation du parcours du regard :
+ * heatmap, scanpath, fixations numérotées et panneau d'informations.
+ */
+
+#gaze-viz-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 100000;
+  background: rgba(10, 12, 24, 0.92);
+  font-family: Arial, sans-serif;
+  color: #eee;
+}
+
+.gv-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.gv-info-panel {
+  position: absolute;
+  top: 18px;
+  left: 18px;
+  background: rgba(15, 15, 26, 0.9);
+  border: 1px solid rgba(108, 140, 255, 0.4);
+  border-radius: 10px;
+  padding: 14px 18px;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+.gv-info-title {
+  font-weight: bold;
+  color: #6c8cff;
+  margin-bottom: 6px;
+}
+
+.gv-info-legend {
+  margin-top: 8px;
+  color: #9aa6c0;
+  font-size: 0.75rem;
+}
+
+.gv-close-btn {
+  position: absolute;
+  top: 18px;
+  right: 18px;
+  background: #6c8cff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 10px 18px;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: Arial, sans-serif;
+  font-size: 0.9rem;
+  transition: opacity 0.15s;
+}
+
+.gv-close-btn:hover {
+  opacity: 0.85;
+}

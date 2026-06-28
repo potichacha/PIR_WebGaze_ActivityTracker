@@ -1,0 +1,139 @@
+/**
+ * participant-form.css
+ *
+ * Formulaire participant modal. La couleur d'accent est injectée par JS via
+ * la propriété CSS personnalisée --pf-accent posée sur #pf-overlay, ce qui
+ * permet au formulaire d'adopter la teinte de chaque moteur (turquoise pour
+ * WebGazer, indigo pour MediaPipe) sans aucun style inline.
+ */
+
+#pf-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  z-index: 99000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: "Segoe UI", Arial, sans-serif;
+}
+
+.pf-card {
+  background: #16213e;
+  border-radius: 16px;
+  padding: 32px 36px;
+  width: 90%;
+  max-width: 420px;
+  color: #eee;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
+}
+
+.pf-title {
+  margin: 0 0 4px;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+}
+
+.pf-title-text {
+  color: var(--pf-accent, #4ecdc4);
+}
+
+.pf-engine-badge {
+  font-size: 0.72rem;
+  background: rgba(78, 205, 196, 0.12);
+  border: 1px solid rgba(78, 205, 196, 0.2);
+  border-radius: 999px;
+  padding: 2px 10px;
+  color: var(--pf-accent, #4ecdc4);
+  margin-left: 8px;
+  font-weight: 600;
+}
+
+.pf-hint {
+  margin: 0 0 20px;
+  color: #9aa6c0;
+  font-size: 0.81rem;
+  line-height: 1.5;
+}
+
+.pf-id-box {
+  background: #0a1628;
+  border: 2px solid var(--pf-accent, #4ecdc4);
+  border-radius: 10px;
+  padding: 14px 18px;
+  margin-bottom: 22px;
+  text-align: center;
+}
+
+.pf-id-label {
+  font-size: 0.72rem;
+  color: #9aa6c0;
+  margin-bottom: 4px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+#pf-id-display {
+  font-family: monospace;
+  font-size: 1.55rem;
+  color: var(--pf-accent, #4ecdc4);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.pf-field {
+  margin-bottom: 14px;
+}
+
+.pf-field--last {
+  margin-bottom: 22px;
+}
+
+.pf-label {
+  display: block;
+  font-size: 0.8rem;
+  color: #9aa6c0;
+  margin-bottom: 5px;
+}
+
+.pf-lux-note {
+  color: var(--pf-accent, #4ecdc4);
+  font-size: 0.75rem;
+}
+
+.pf-select {
+  width: 100%;
+  background: #0d1b2a;
+  border: 1px solid #2c3e50;
+  border-radius: 8px;
+  color: #eee;
+  padding: 9px 12px;
+  box-sizing: border-box;
+  font-size: 0.93rem;
+  outline: none;
+  font-family: inherit;
+  transition: border-color 0.2s;
+}
+
+.pf-select:focus {
+  border-color: var(--pf-accent, #4ecdc4);
+}
+
+.pf-submit {
+  width: 100%;
+  background: var(--pf-accent, #4ecdc4);
+  color: #0f0f1a;
+  border: none;
+  border-radius: 8px;
+  padding: 12px;
+  font-weight: 700;
+  font-size: 0.98rem;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s;
+}
+
+.pf-submit:hover {
+  opacity: 0.85;
+}

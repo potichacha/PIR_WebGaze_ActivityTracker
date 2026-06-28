@@ -1,253 +1,246 @@
 /**
- * gaze-capture.js — Module de capture du flux de regard (US-2.1)
+ * gaze-capture.js
+ *
+ * Capture du flux de regard via WebGazer. Le module vérifie d'abord l'accès à la
+ * webcam, initialise WebGazer, puis diffuse chaque point de regard aux callbacks
+ * enregistrés tout en les accumulant dans un buffer de données brutes.
+ *
+ * Un petit indicateur de statut est affiché en bas à gauche de la page pour
+ * refléter l'état courant (inactif, en cours, erreur). Son style provient de
+ * gaze-capture.css ; seules la couleur du point et son animation sont mises à
+ * jour dynamiquement via JS.
  *
  * API publique :
- *   GazeCapture.start()               → Promise<void>
- *   GazeCapture.stop()                → void
- *   GazeCapture.onGazeData(callback)  → void  (callback: {x, y, timestamp})
- *   GazeCapture.offGazeData(callback) → void
- *   GazeCapture.getStatus()           → 'idle' | 'running' | 'error'
- *   GazeCapture.getRawData()          → Array<{x, y, timestamp}>
- *   GazeCapture.clearRawData()        → void
+ *   GazeCapture.start()               Promise<void>
+ *   GazeCapture.stop()                void
+ *   GazeCapture.onGazeData(callback)  void  (callback reçoit {x, y, timestamp})
+ *   GazeCapture.offGazeData(callback) void
+ *   GazeCapture.getStatus()           'idle' | 'running' | 'error'
+ *   GazeCapture.getErrorMessage()     string | null
+ *   GazeCapture.getRawData()          Array<{x, y, timestamp}>
+ *   GazeCapture.clearRawData()        void
  */
 
 (function (global) {
   'use strict';
 
-  // ─── État interne ──────────────────────────────────────────────────────────
-  let _status    = 'idle';      // 'idle' | 'running' | 'error'
-  let _rawData   = [];
-  let _callbacks = [];
-  let _errorMsg  = null;
+  let status = 'idle';
+  let rawData = [];
+  let callbacks = [];
+  let errorMessage = null;
 
   const CAMERA_CONSTRAINTS = {
     video: {
-      width:     { min: 640, ideal: 1280, max: 1920 },
-      height:    { min: 480, ideal: 720,  max: 1080 },
-      frameRate: { ideal: 30, max: 60 },
+      width:      { min: 640, ideal: 1280, max: 1920 },
+      height:     { min: 480, ideal: 720,  max: 1080 },
+      frameRate:  { ideal: 30, max: 60 },
       facingMode: 'user'
     }
   };
 
-  // ─── Helpers ───────────────────────────────────────────────────────────────
-
-  function _setStatus(s) {
-    _status = s;
-    _updateStatusUI(s);
+  function setStatus(next) {
+    status = next;
+    updateStatusUI(next);
   }
 
-  function _emit(point) {
-    _rawData.push(point);
-    for (let i = 0; i < _callbacks.length; i++) {
-      try { _callbacks[i](point); } catch (_) {}
+  function emit(point) {
+    rawData.push(point);
+    for (let i = 0; i < callbacks.length; i++) {
+      try {
+        callbacks[i](point);
+      } catch (_) {}
     }
   }
 
-  // ─── UI d'indicateur de statut ─────────────────────────────────────────────
+  function ensureStatusIndicator() {
+    if (typeof document === 'undefined') {
+      return;
+    }
+    if (document.getElementById('gc-status-indicator')) {
+      return;
+    }
 
-  function _ensureStatusIndicator() {
-    if (typeof document === 'undefined') return;
-    if (document.getElementById('gc-status-indicator')) return;
+    const indicator = document.createElement('div');
+    indicator.id = 'gc-status-indicator';
 
-    const el = document.createElement('div');
-    el.id = 'gc-status-indicator';
-    el.style.cssText = `
-      position: fixed; bottom: 16px; left: 16px;
-      z-index: 99998;
-      display: flex; align-items: center; gap: 8px;
-      background: rgba(15,15,26,0.88);
-      border: 1px solid rgba(78,205,196,0.3);
-      border-radius: 20px;
-      padding: 6px 14px;
-      font-family: Arial, sans-serif;
-      font-size: 0.8rem; color: #bbb;
-      pointer-events: none;
-      transition: opacity 0.3s;
-    `;
-    el.innerHTML = `
-      <span id="gc-status-dot" style="
-        display:inline-block; width:8px; height:8px;
-        border-radius:50%; background:#888; flex-shrink:0;
-      "></span>
-      <span id="gc-status-text">Webcam inactive</span>
-    `;
-    document.body.appendChild(el);
+    const dot = document.createElement('span');
+    dot.id = 'gc-status-dot';
+
+    const text = document.createElement('span');
+    text.id = 'gc-status-text';
+    text.textContent = 'Webcam inactive';
+
+    indicator.appendChild(dot);
+    indicator.appendChild(text);
+    document.body.appendChild(indicator);
   }
 
-  function _updateStatusUI(status) {
-    if (typeof document === 'undefined') return;
+  function statusAppearance(current) {
+    if (current === 'running') {
+      return { color: '#27ae60', label: 'Regard capturé' };
+    }
+    if (current === 'error') {
+      return { color: '#e74c3c', label: errorMessage || 'Erreur webcam' };
+    }
+    return { color: '#888', label: 'Webcam inactive' };
+  }
+
+  function updateStatusUI(current) {
+    if (typeof document === 'undefined') {
+      return;
+    }
     const dot  = document.getElementById('gc-status-dot');
     const text = document.getElementById('gc-status-text');
-    if (!dot || !text) return;
+    if (!dot || !text) {
+      return;
+    }
 
-    const map = {
-      idle:    { color: '#888',    label: 'Webcam inactive' },
-      running: { color: '#27ae60', label: 'Regard capturé' },
-      error:   { color: '#e74c3c', label: _errorMsg || 'Erreur webcam' },
-    };
-    const s = map[status] || map.idle;
-    dot.style.background  = s.color;
-    text.textContent      = s.label;
+    const appearance = statusAppearance(current);
+    dot.style.background = appearance.color;
+    text.textContent = appearance.label;
 
-    if (status === 'running') {
+    if (current === 'running') {
       dot.style.animation = 'gc-blink 1.4s infinite';
     } else {
       dot.style.animation = 'none';
     }
   }
 
-  function _injectStyles() {
-    if (typeof document === 'undefined') return;
-    if (document.getElementById('gc-styles')) return;
-    const style = document.createElement('style');
-    style.id = 'gc-styles';
-    style.textContent = `
-      @keyframes gc-blink {
-        0%, 100% { opacity: 1; }
-        50%       { opacity: 0.3; }
-      }
-    `;
-    document.head.appendChild(style);
+  function webcamErrorMessage(err) {
+    if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
+      return 'Permission webcam refusée. Autorisez l\'accès dans les paramètres du navigateur.';
+    }
+    if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
+      return 'Aucune webcam détectée.';
+    }
+    if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
+      return 'Webcam utilisée par une autre application.';
+    }
+    return 'Erreur webcam : ' + err.message;
   }
 
-  // ─── Vérification webcam via getUserMedia ─────────────────────────────────
+  function getUserMediaSupported() {
+    return typeof navigator !== 'undefined'
+      && navigator.mediaDevices
+      && navigator.mediaDevices.getUserMedia;
+  }
 
-  function _checkWebcamAvailable() {
+  function checkWebcamAvailable() {
     return new Promise((resolve, reject) => {
-      if (typeof navigator === 'undefined' ||
-          !navigator.mediaDevices ||
-          !navigator.mediaDevices.getUserMedia) {
+      if (!getUserMediaSupported()) {
         reject(new Error('getUserMedia non supporté sur ce navigateur.'));
         return;
       }
-      // Demande une permission minimale pour valider l'accès
       navigator.mediaDevices.getUserMedia(CAMERA_CONSTRAINTS)
         .then(stream => {
-          // Libérer immédiatement — WebGazer gère sa propre capture
-          stream.getTracks().forEach(t => t.stop());
+          stream.getTracks().forEach(track => track.stop());
           resolve();
         })
         .catch(err => {
-          let msg;
-          if (err.name === 'NotAllowedError' || err.name === 'PermissionDeniedError') {
-            msg = 'Permission webcam refusée. Autorisez l\'accès dans les paramètres du navigateur.';
-          } else if (err.name === 'NotFoundError' || err.name === 'DevicesNotFoundError') {
-            msg = 'Aucune webcam détectée.';
-          } else if (err.name === 'NotReadableError' || err.name === 'TrackStartError') {
-            msg = 'Webcam utilisée par une autre application.';
-          } else {
-            msg = 'Erreur webcam : ' + err.message;
-          }
-          reject(new Error(msg));
+          reject(new Error(webcamErrorMessage(err)));
         });
     });
   }
 
-  // ─── API publique ──────────────────────────────────────────────────────────
+  function configureWebgazer() {
+    try { webgazer.setCameraConstraints(CAMERA_CONSTRAINTS); } catch (_) {}
+    try { webgazer.setInternalVideoBufferSizes(640, 480); } catch (_) {}
+    try { webgazer.removeMouseEventListeners(); } catch (_) {}
+  }
+
+  function onWebgazerGaze(data) {
+    if (!data || data.x == null || data.y == null) {
+      return;
+    }
+    if (status !== 'running') {
+      return;
+    }
+    emit({ x: data.x, y: data.y, timestamp: Date.now() });
+  }
+
+  function hideWebgazerOverlays() {
+    webgazer.showVideo(false)
+            .showFaceOverlay(false)
+            .showFaceFeedbackBox(false)
+            .showPredictionPoints(false);
+  }
 
   const GazeCapture = {
 
-    /**
-     * Démarre la capture.
-     * Vérifie la permission webcam puis initialise WebGazer.
-     * @returns {Promise<void>}
-     */
     start() {
-      if (_status === 'running') return Promise.resolve();
+      if (status === 'running') {
+        return Promise.resolve();
+      }
 
-      _injectStyles();
-      _ensureStatusIndicator();
-      _setStatus('idle');
+      ensureStatusIndicator();
+      setStatus('idle');
 
-      return _checkWebcamAvailable()
+      return checkWebcamAvailable()
         .then(() => {
           if (typeof webgazer === 'undefined') {
             throw new Error('WebGazer non chargé. Incluez webgazer.min.js avant ce module.');
           }
-
-          // Désactiver le mouse-move comme source d'entraînement
-          // (mouse-move pollue le modèle — issue #39 WebGazer)
-          try { webgazer.setCameraConstraints(CAMERA_CONSTRAINTS); } catch (_) {}
-          try { webgazer.setInternalVideoBufferSizes(640, 480); } catch (_) {}
-          try { webgazer.removeMouseEventListeners(); } catch (_) {}
-
-          webgazer.setGazeListener((data, elapsed) => {
-            if (!data || data.x == null || data.y == null) return;
-            if (_status !== 'running') return;
-            _emit({ x: data.x, y: data.y, timestamp: Date.now() });
-          });
-
+          configureWebgazer();
+          webgazer.setGazeListener(onWebgazerGaze);
           return webgazer.begin();
         })
         .then(() => {
-          webgazer.showVideo(false)
-                  .showFaceOverlay(false)
-                  .showFaceFeedbackBox(false)
-                  .showPredictionPoints(false);
-          _setStatus('running');
+          hideWebgazerOverlays();
+          setStatus('running');
         })
         .catch(err => {
-          _errorMsg = err.message;
-          _setStatus('error');
+          errorMessage = err.message;
+          setStatus('error');
           throw err;
         });
     },
 
-    /**
-     * Arrête la capture et libère les ressources.
-     */
     stop() {
       if (typeof webgazer !== 'undefined') {
         try { webgazer.clearGazeListener(); } catch (_) {}
-        try { webgazer.end();               } catch (_) {}
+        try { webgazer.end(); } catch (_) {}
       }
-      _setStatus('idle');
-      _errorMsg = null;
+      setStatus('idle');
+      errorMessage = null;
     },
 
-    /**
-     * Enregistre un callback appelé à chaque point de regard.
-     * @param {function({x: number, y: number, timestamp: number}): void} callback
-     */
     onGazeData(callback) {
-      if (typeof callback !== 'function') return;
-      if (!_callbacks.includes(callback)) _callbacks.push(callback);
+      if (typeof callback !== 'function') {
+        return;
+      }
+      if (!callbacks.includes(callback)) {
+        callbacks.push(callback);
+      }
     },
 
-    /**
-     * Supprime un callback précédemment enregistré.
-     */
     offGazeData(callback) {
-      _callbacks = _callbacks.filter(cb => cb !== callback);
+      callbacks = callbacks.filter(cb => cb !== callback);
     },
 
-    /**
-     * @returns {'idle'|'running'|'error'}
-     */
-    getStatus() { return _status; },
+    getStatus() {
+      return status;
+    },
 
-    /**
-     * @returns {string|null} Message d'erreur si status === 'error'
-     */
-    getErrorMessage() { return _errorMsg; },
+    getErrorMessage() {
+      return errorMessage;
+    },
 
-    /**
-     * @returns {Array<{x: number, y: number, timestamp: number}>}
-     */
-    getRawData() { return _rawData.slice(); },
+    getRawData() {
+      return rawData.slice();
+    },
 
-    /**
-     * Vide le buffer de données brutes.
-     */
-    clearRawData() { _rawData = []; },
+    clearRawData() {
+      rawData = [];
+    },
   };
 
   global.GazeCapture = GazeCapture;
 
-  // Nettoyage automatique à la fermeture de la page
   if (typeof window !== 'undefined') {
     window.addEventListener('beforeunload', function () {
-      if (_status === 'running') GazeCapture.stop();
+      if (status === 'running') {
+        GazeCapture.stop();
+      }
     });
   }
 

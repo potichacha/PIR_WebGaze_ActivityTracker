@@ -11,6 +11,10 @@
   <link rel="stylesheet" href="src/barchart/barchart.css" />
   <link rel="stylesheet" href="src/linechart/linechart.css" />
   <link rel="stylesheet" href="src/scatterchart/scatterchart.css" />
+  <link rel="stylesheet" href="src/participant-form/participant-form.css" />
+  <link rel="stylesheet" href="src/test-scenario/test-scenario.css" />
+  <link rel="stylesheet" href="src/gaze-viz/gaze-viz.css" />
+  <link rel="stylesheet" href="src/results-view/results-view.css" />
 
   <style>
     :root { --bg:#0f0f1a; --panel:#16213e; --accent:#6c8cff; --accent2:#4ecdc4; --text:#eee; --muted:#9aa6c0; }
@@ -59,7 +63,85 @@
       background:rgba(15,15,26,.92); border:1px solid rgba(108,140,255,.4); border-radius:12px;
       padding:10px 12px; font-size:.78rem; color:#ddd; }
     #face-widget .fw-row { display:flex; justify-content:space-between; margin:3px 0; }
-    #face-widget .fw-dot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:5px; }
+    #face-widget .fw-dot { width:9px; height:9px; border-radius:50%; display:inline-block; margin-right:5px; background:#888; }
+    #face-widget .fw-title { font-weight:bold; color:var(--accent2); margin-bottom:5px; }
+
+    /* ── Positionnement MediaPipe ───────────────────────────────────────────── */
+    .mp-pos-box {
+      position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+      text-align:center; color:#eee;
+    }
+    .mp-pos-video-wrap { position:relative; width:320px; height:240px; margin:0 auto 14px; }
+    .mp-pos-video {
+      width:320px; height:240px; border-radius:12px; border:3px solid #6c8cff;
+      transform:scaleX(-1); object-fit:cover;
+    }
+    .mp-pos-oval {
+      position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+      width:130px; height:170px; border-radius:50%; border:3px dashed #e74c3c;
+      pointer-events:none; transition:border-color .3s, box-shadow .3s;
+    }
+    .mp-pos-status {
+      background:#16213e; border-radius:10px; padding:10px 18px;
+      margin-bottom:14px; font-size:.9rem; line-height:1.8; min-width:300px;
+    }
+    .mp-pos-status-ok   { color:#27ae60; }
+    .mp-pos-status-warn { color:#e0a96a; }
+    .mp-pos-go {
+      background:#6c8cff; color:#fff; border:none; border-radius:8px;
+      padding:12px 22px; font-weight:700; cursor:pointer; font-family:inherit;
+    }
+    /* ── Mode de calibration ────────────────────────────────────────────────── */
+    .mp-cal-mode-box {
+      position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+      background:#16213e; border-radius:14px; padding:28px 34px;
+      width:90%; max-width:520px; color:#eee; text-align:center;
+    }
+    .mp-cal-mode-title { margin:0 0 10px; color:#6c8cff; }
+    .mp-cal-mode-hint  { color:#9aa6c0; font-size:.86rem; line-height:1.6; margin:0 0 20px; }
+    .mp-cal-mode-btns  { display:flex; gap:12px; flex-wrap:wrap; justify-content:center; }
+    .mp-cal-pursuit {
+      background:#6c8cff; color:#fff; border:none; border-radius:9px;
+      padding:13px 20px; font-weight:700; cursor:pointer; flex:1; min-width:200px; font-family:inherit;
+    }
+    .mp-cal-clicks {
+      background:transparent; color:#4ecdc4; border:1px solid rgba(78,205,196,.5);
+      border-radius:9px; padding:13px 20px; font-weight:700; cursor:pointer; flex:1; min-width:200px; font-family:inherit;
+    }
+    /* ── Vérification libre ─────────────────────────────────────────────────── */
+    .mp-freelook-box {
+      position:fixed; bottom:24px; left:50%; transform:translateX(-50%); z-index:10006;
+      background:rgba(15,15,26,.92); border:1px solid rgba(108,140,255,.5); border-radius:12px;
+      padding:14px 22px; color:#eee; text-align:center; font-size:.9rem; line-height:1.6;
+    }
+    .mp-freelook-title  { color:#6c8cff; font-weight:bold; margin-bottom:4px; }
+    .mp-freelook-accent { color:#6c8cff; }
+    .mp-freelook-ok {
+      margin-top:10px; background:#4ecdc4; color:#0f0f1a; border:none;
+      border-radius:8px; padding:9px 18px; font-weight:700; cursor:pointer; font-family:inherit;
+    }
+    .mp-freelook-recal {
+      margin-top:10px; background:transparent; color:#e0a96a;
+      border:1px solid rgba(224,169,106,.5); border-radius:8px; padding:9px 18px; cursor:pointer; font-family:inherit;
+    }
+    /* ── Point de regard de calibration ────────────────────────────────────── */
+    #mp-cal-gaze-dot {
+      position:fixed; width:22px; height:22px; border-radius:50%;
+      background:rgba(108,140,255,.85); border:2px solid #fff;
+      transform:translate(-50%,-50%); pointer-events:none; z-index:10005;
+      box-shadow:0 0 12px 3px rgba(108,140,255,.6);
+      transition:left .05s, top .05s; display:none;
+    }
+    /* ── Poursuite : bille et barre de progression ──────────────────────────── */
+    .mp-pursuit-ball {
+      position:absolute; width:34px; height:34px; border-radius:50%; z-index:6;
+      background:radial-gradient(circle at 35% 35%, #9db4ff, #6c8cff 60%, #3a55c8);
+      box-shadow:0 0 18px 6px rgba(108,140,255,.55); transform:translate(-50%,-50%);
+    }
+    .mp-pursuit-progress {
+      position:absolute; top:0; left:0; height:4px; width:0%;
+      background:#6c8cff; transition:width .2s;
+    }
   </style>
 </head>
 <body>
@@ -108,11 +190,48 @@
 
   <!-- Retour visage permanent -->
   <div id="face-widget">
-    <div style="font-weight:bold;color:var(--accent2);margin-bottom:5px;">Retour visage</div>
-    <div class="fw-row"><span><span class="fw-dot" id="fw-face-dot" style="background:#888"></span>Visage</span><span id="fw-face">—</span></div>
-    <div class="fw-row"><span><span class="fw-dot" id="fw-dist-dot" style="background:#888"></span>Distance</span><span id="fw-dist">—</span></div>
-    <div class="fw-row"><span><span class="fw-dot" id="fw-lux-dot" style="background:#888"></span>Luminosité</span><span id="fw-lux">—</span></div>
+    <div class="fw-title">Retour visage</div>
+    <div class="fw-row"><span><span class="fw-dot" id="fw-face-dot"></span>Visage</span><span id="fw-face">—</span></div>
+    <div class="fw-row"><span><span class="fw-dot" id="fw-dist-dot"></span>Distance</span><span id="fw-dist">—</span></div>
+    <div class="fw-row"><span><span class="fw-dot" id="fw-lux-dot"></span>Luminosité</span><span id="fw-lux">—</span></div>
   </div>
+
+  <!-- Gabarit du formulaire participant (hydraté dynamiquement par participant-form.js) -->
+  <template id="pf-modal">
+    <div id="pf-overlay">
+      <div class="pf-card">
+        <h3 class="pf-title">
+          <span class="pf-title-text">Informations participant</span>
+          <span class="pf-engine-badge"></span>
+        </h3>
+        <p class="pf-hint">Notez votre identifiant avant de continuer — il sera utilisé pour retrouver vos données.</p>
+        <div class="pf-id-box">
+          <div class="pf-id-label">Votre identifiant</div>
+          <div id="pf-id-display"></div>
+        </div>
+        <div class="pf-field">
+          <label class="pf-label" for="pf-glasses">Correction visuelle</label>
+          <select id="pf-glasses" class="pf-select">
+            <option value="non">Aucune</option>
+            <option value="lunettes">Lunettes</option>
+            <option value="lentilles">Lentilles</option>
+          </select>
+        </div>
+        <div class="pf-field pf-field--last">
+          <label class="pf-label" for="pf-lighting">
+            Luminosité ambiante
+            <span class="pf-lux-note"></span>
+          </label>
+          <select id="pf-lighting" class="pf-select">
+            <option value="faible">Faible — store fermé / lampe de bureau</option>
+            <option value="normale" selected>Normale — bureau éclairé</option>
+            <option value="forte">Forte — lumière naturelle directe</option>
+          </select>
+        </div>
+        <button id="pf-go" class="pf-submit">Commencer →</button>
+      </div>
+    </div>
+  </template>
 
   <!-- Modules partagés (logique d'analyse indépendante du moteur) -->
   <script src="src/calibration/calibration.js?v=mp"></script>
@@ -270,27 +389,46 @@
       document.getElementById('mp-sub').textContent = 'Centrez votre visage dans l\'ovale, ~60 cm de l\'écran';
 
       var box = document.createElement('div');
-      box.className = 'mp-form';
-      box.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;color:#eee;';
+      box.className = 'mp-form mp-pos-box';
 
-      // Miroir caméra + ovale cible
-      box.innerHTML =
-        '<div style="position:relative;width:320px;height:240px;margin:0 auto 14px;">'
-        + '  <video id="mp-pos-video" autoplay playsinline muted style="width:320px;height:240px;border-radius:12px;border:3px solid #6c8cff;transform:scaleX(-1);object-fit:cover;"></video>'
-        + '  <div id="mp-pos-oval" style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:130px;height:170px;border-radius:50%;border:3px dashed #e74c3c;pointer-events:none;transition:border-color .3s,box-shadow .3s;"></div>'
-        + '</div>'
-        + '<div id="mp-pos-status" style="background:#16213e;border-radius:10px;padding:10px 18px;margin-bottom:14px;font-size:.9rem;line-height:1.8;min-width:300px;">Détection du visage…</div>'
-        + '<button id="p-go" disabled style="background:#6c8cff;color:#fff;border:none;border-radius:8px;padding:12px 22px;font-weight:700;cursor:pointer;opacity:.45;">Je suis prêt — Démarrer →</button>';
+      var videoWrap = document.createElement('div');
+      videoWrap.className = 'mp-pos-video-wrap';
+
+      var posVidEl = document.createElement('video');
+      posVidEl.id = 'mp-pos-video';
+      posVidEl.className = 'mp-pos-video';
+      posVidEl.autoplay = true;
+      posVidEl.setAttribute('playsinline', '');
+      posVidEl.muted = true;
+      videoWrap.appendChild(posVidEl);
+
+      var posOvalEl = document.createElement('div');
+      posOvalEl.id = 'mp-pos-oval';
+      posOvalEl.className = 'mp-pos-oval';
+      videoWrap.appendChild(posOvalEl);
+
+      box.appendChild(videoWrap);
+
+      var statusBox = document.createElement('div');
+      statusBox.id = 'mp-pos-status';
+      statusBox.className = 'mp-pos-status';
+      statusBox.textContent = 'Détection du visage…';
+      box.appendChild(statusBox);
+
+      var goBtn = document.createElement('button');
+      goBtn.id = 'p-go';
+      goBtn.className = 'mp-pos-go';
+      goBtn.disabled = true;
+      goBtn.style.opacity = '0.45';
+      goBtn.textContent = 'Je suis prêt — Démarrer →';
+      box.appendChild(goBtn);
+
       overlay.appendChild(box);
 
-      // Réutilise le flux caméra déjà ouvert par le moteur (élément #mp-video).
-      var posVid = document.getElementById('mp-pos-video');
       var srcVid = document.getElementById('mp-video');
-      if (srcVid && srcVid.srcObject) posVid.srcObject = srcVid.srcObject;
+      if (srcVid && srcVid.srcObject) { posVidEl.srcObject = srcVid.srcObject; }
 
-      var oval = document.getElementById('mp-pos-oval');
-      var statusBox = document.getElementById('mp-pos-status');
-      var goBtn = document.getElementById('p-go');
+      var oval = posOvalEl;
       var ready = false;
 
       var iv = setInterval(function () {
@@ -377,24 +515,49 @@
       overlay.classList.add('on');
       document.getElementById('mp-h').textContent = 'Mode de calibration';
       document.getElementById('mp-sub').textContent = 'Choisissez comment calibrer';
+
       var box = document.createElement('div');
-      box.className = 'mp-form';
-      box.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);'
-        + 'background:#16213e;border-radius:14px;padding:28px 34px;width:90%;max-width:520px;color:#eee;text-align:center;';
-      box.innerHTML =
-        '<h3 style="margin:0 0 10px;color:#6c8cff;">Comment voulez-vous calibrer ?</h3>'
-        + '<p style="color:#9aa6c0;font-size:.86rem;line-height:1.6;margin:0 0 20px;">'
-        + 'La <b>poursuite</b> collecte beaucoup plus de données (souvent plus précis) : '
-        + 'suivez simplement la bille du regard, sans cliquer.</p>'
-        + '<div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center;">'
-        + '<button id="cm-pursuit" style="background:#6c8cff;color:#fff;border:none;border-radius:9px;padding:13px 20px;font-weight:700;cursor:pointer;flex:1;min-width:200px;">Poursuite (cible mobile) ✦</button>'
-        + '<button id="cm-clicks" style="background:transparent;color:#4ecdc4;border:1px solid rgba(78,205,196,.5);border-radius:9px;padding:13px 20px;font-weight:700;cursor:pointer;flex:1;min-width:200px;">Clics (25 points)</button>'
-        + '</div>';
+      box.className = 'mp-form mp-cal-mode-box';
+
+      var h3 = document.createElement('h3');
+      h3.className = 'mp-cal-mode-title';
+      h3.textContent = 'Comment voulez-vous calibrer ?';
+      box.appendChild(h3);
+
+      var p = document.createElement('p');
+      p.className = 'mp-cal-mode-hint';
+      p.appendChild(document.createTextNode('La '));
+      var b = document.createElement('b');
+      b.textContent = 'poursuite';
+      p.appendChild(b);
+      p.appendChild(document.createTextNode(
+        ' collecte beaucoup plus de données (souvent plus précis) : '
+        + 'suivez simplement la bille du regard, sans cliquer.'
+      ));
+      box.appendChild(p);
+
+      var btns = document.createElement('div');
+      btns.className = 'mp-cal-mode-btns';
+
+      var pursuitBtn = document.createElement('button');
+      pursuitBtn.id = 'cm-pursuit';
+      pursuitBtn.className = 'mp-cal-pursuit';
+      pursuitBtn.textContent = 'Poursuite (cible mobile) ✦';
+      btns.appendChild(pursuitBtn);
+
+      var clicksBtn = document.createElement('button');
+      clicksBtn.id = 'cm-clicks';
+      clicksBtn.className = 'mp-cal-clicks';
+      clicksBtn.textContent = 'Clics (25 points)';
+      btns.appendChild(clicksBtn);
+
+      box.appendChild(btns);
       overlay.appendChild(box);
-      document.getElementById('cm-pursuit').addEventListener('click', function () {
+
+      pursuitBtn.addEventListener('click', function () {
         box.remove(); setStatus('Calibration par poursuite…', '#4ecdc4'); runPursuitCalibration();
       });
-      document.getElementById('cm-clicks').addEventListener('click', function () {
+      clicksBtn.addEventListener('click', function () {
         box.remove(); setStatus('Calibration en cours…', '#4ecdc4'); runCalibration();
       });
     }
@@ -420,13 +583,11 @@
       path.push({xPct:8,yPct:88},{xPct:50,yPct:50},{xPct:92,yPct:12});
 
       var ball = document.createElement('div');
-      ball.style.cssText = 'position:absolute;width:34px;height:34px;border-radius:50%;z-index:6;'
-        + 'background:radial-gradient(circle at 35% 35%,#9db4ff,#6c8cff 60%,#3a55c8);'
-        + 'box-shadow:0 0 18px 6px rgba(108,140,255,.55);transform:translate(-50%,-50%);';
+      ball.classList.add('mp-pursuit-ball');
       overlay.appendChild(ball);
 
       var progress = document.createElement('div');
-      progress.style.cssText = 'position:absolute;top:0;left:0;height:4px;width:0%;background:#6c8cff;transition:width .2s;';
+      progress.classList.add('mp-pursuit-progress');
       overlay.appendChild(progress);
 
       var SEG_MS = 1100;       // durée d'un déplacement entre 2 points
@@ -526,11 +687,6 @@
       if (!_calDot) {
         _calDot = document.createElement('div');
         _calDot.id = 'mp-cal-gaze-dot';
-        _calDot.style.cssText =
-          'position:fixed;width:22px;height:22px;border-radius:50%;'
-          + 'background:rgba(108,140,255,0.85);border:2px solid #fff;'
-          + 'transform:translate(-50%,-50%);pointer-events:none;z-index:10005;'
-          + 'box-shadow:0 0 12px 3px rgba(108,140,255,0.6);transition:left .05s,top .05s;display:none;';
         document.body.appendChild(_calDot);
       }
       _calDotListener = function (g) {
@@ -643,29 +799,47 @@
 
     // Écran de vérification : le point de regard live (corrigé) reste visible.
     function showFreeLookCheck() {
-      // Le point live continue de tourner (listener encore actif depuis runValidation).
       var box = document.createElement('div');
       box.id = 'mp-freelook';
-      box.style.cssText =
-        'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:10006;'
-        + 'background:rgba(15,15,26,0.92);border:1px solid rgba(108,140,255,0.5);border-radius:12px;'
-        + 'padding:14px 22px;color:#eee;text-align:center;font-size:0.9rem;line-height:1.6;';
-      box.innerHTML =
-        '<div style="color:#6c8cff;font-weight:bold;margin-bottom:4px;">Vérification du regard</div>'
-        + 'Le <span style="color:#6c8cff;">point bleu</span> suit votre regard. '
-        + 'Promenez vos yeux à l\'écran : le point doit vous suivre.<br>'
-        + '<button id="mp-freelook-ok" style="margin-top:10px;background:#4ecdc4;color:#0f0f1a;border:none;'
-        + 'border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">C\'est bon, lancer le test →</button> '
-        + '<button id="mp-freelook-recal" style="margin-top:10px;background:transparent;color:#e0a96a;'
-        + 'border:1px solid rgba(224,169,106,0.5);border-radius:8px;padding:9px 18px;cursor:pointer;">Recalibrer</button>';
+      box.classList.add('mp-freelook-box');
+
+      var title = document.createElement('div');
+      title.className = 'mp-freelook-title';
+      title.textContent = 'Vérification du regard';
+      box.appendChild(title);
+
+      box.appendChild(document.createTextNode('Le '));
+      var accentSpan = document.createElement('span');
+      accentSpan.className = 'mp-freelook-accent';
+      accentSpan.textContent = 'point bleu';
+      box.appendChild(accentSpan);
+      box.appendChild(document.createTextNode(
+        ' suit votre regard. Promenez vos yeux à l\'écran : le point doit vous suivre.'
+      ));
+      box.appendChild(document.createElement('br'));
+
+      var okBtn = document.createElement('button');
+      okBtn.id = 'mp-freelook-ok';
+      okBtn.className = 'mp-freelook-ok';
+      okBtn.textContent = 'C\'est bon, lancer le test →';
+      box.appendChild(okBtn);
+
+      box.appendChild(document.createTextNode(' '));
+
+      var recalBtn = document.createElement('button');
+      recalBtn.id = 'mp-freelook-recal';
+      recalBtn.className = 'mp-freelook-recal';
+      recalBtn.textContent = 'Recalibrer';
+      box.appendChild(recalBtn);
+
       document.body.appendChild(box);
 
-      document.getElementById('mp-freelook-ok').addEventListener('click', function () {
+      okBtn.addEventListener('click', function () {
         stopCalGazeDot();
         box.remove();
-        startTestScenario(); // lance le scénario automatique (cercle + 15s libre × 3)
+        startTestScenario();
       });
-      document.getElementById('mp-freelook-recal').addEventListener('click', function () {
+      recalBtn.addEventListener('click', function () {
         stopCalGazeDot();
         box.remove();
         Engine.clearCalibration();

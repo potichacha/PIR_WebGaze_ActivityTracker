@@ -1,154 +1,258 @@
 /**
- * gaze-viz.js — Visualisation du parcours du regard en fin de session.
+ * gaze-viz.js
  *
- * Affiche, par-dessus la page, un overlay plein écran combinant :
- *   - une HEATMAP (densité des points de regard, du bleu au rouge),
- *   - le SCANPATH (chemin temporel reliant les fixations, numérotées),
- *   - les fixations (cercles dont le rayon ∝ durée) et les points bruts.
+ * Visualisation du parcours du regard en fin de session. Le module affiche un
+ * overlay plein écran qui combine, par-dessus la page :
+ *   - une heatmap de densité des points de regard (du bleu au rouge) ;
+ *   - le scanpath, c'est-à-dire le chemin temporel reliant les fixations
+ *     numérotées dans l'ordre ;
+ *   - les fixations sous forme de cercles dont le rayon est proportionnel à la
+ *     durée, ainsi que les points bruts.
  *
- * Indépendant du moteur (WebGazer ou MediaPipe) : ne consomme que les données
- * exportées par GazeLogger (raw_gaze_data + events).
+ * Le module est indépendant du moteur (WebGazer ou MediaPipe) : il ne consomme
+ * que les données exportées par GazeLogger (raw_gaze_data et events).
+ * Les styles de l'overlay proviennent de gaze-viz.css.
  *
- * API : GazeViz.show(sessionData) / GazeViz.hide()
+ * API publique : GazeViz.show(sessionData) / GazeViz.hide()
  */
 (function (global) {
   'use strict';
 
   var OVERLAY_ID = 'gaze-viz-overlay';
 
-  function _clamp(v, a, b) { return Math.max(a, Math.min(b, v)); }
+  function _clamp(v, a, b) {
+    return Math.max(a, Math.min(b, v));
+  }
 
-  // Palette heatmap : valeur normalisée [0,1] → couleur bleu→cyan→jaune→rouge.
   function _heatColor(t, alpha) {
     t = _clamp(t, 0, 1);
     var r, g, b;
-    if (t < 0.25)      { r = 0;             g = Math.round(255 * (t / 0.25)); b = 255; }
-    else if (t < 0.5)  { r = 0;             g = 255; b = Math.round(255 * (1 - (t - 0.25) / 0.25)); }
-    else if (t < 0.75) { r = Math.round(255 * ((t - 0.5) / 0.25)); g = 255; b = 0; }
-    else               { r = 255;           g = Math.round(255 * (1 - (t - 0.75) / 0.25)); b = 0; }
+    if (t < 0.25) {
+      r = 0;
+      g = Math.round(255 * (t / 0.25));
+      b = 255;
+    } else if (t < 0.5) {
+      r = 0;
+      g = 255;
+      b = Math.round(255 * (1 - (t - 0.25) / 0.25));
+    } else if (t < 0.75) {
+      r = Math.round(255 * ((t - 0.5) / 0.25));
+      g = 255;
+      b = 0;
+    } else {
+      r = 255;
+      g = Math.round(255 * (1 - (t - 0.75) / 0.25));
+      b = 0;
+    }
     return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
   }
 
   function hide() {
-    var ex = document.getElementById(OVERLAY_ID);
-    if (ex) ex.remove();
+    var existing = document.getElementById(OVERLAY_ID);
+    if (existing) {
+      existing.remove();
+    }
   }
 
-  function show(session) {
-    hide();
-    if (!session) return;
-    var raw = session.raw_gaze_data || [];
-    var events = session.events || [];
-    var fixations = events.filter(function (e) { return e.type === 'fixation'; });
-
-    var overlay = document.createElement('div');
-    overlay.id = OVERLAY_ID;
-    overlay.style.cssText =
-      'position:fixed;inset:0;z-index:100000;background:rgba(10,12,24,0.92);' +
-      'font-family:Arial,sans-serif;color:#eee;';
-
+  function createCanvas(overlay) {
     var dpr = window.devicePixelRatio || 1;
     var canvas = document.createElement('canvas');
     canvas.width = window.innerWidth * dpr;
     canvas.height = window.innerHeight * dpr;
-    canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;';
+    canvas.classList.add('gv-canvas');
     overlay.appendChild(canvas);
     var ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
+    return ctx;
+  }
 
-    // ── Heatmap : accumulation de gaussiennes sur une grille basse résolution ──
-    var W = window.innerWidth, H = window.innerHeight;
-    var cell = 12;                         // taille de cellule (px)
-    var cols = Math.ceil(W / cell), rows = Math.ceil(H / cell);
+  function buildHeatGrid(raw, cols, rows, cell, radius) {
     var grid = new Float32Array(cols * rows);
     var maxV = 0;
-    var radius = 3;                        // rayon d'influence en cellules
     raw.forEach(function (p) {
-      var gx = Math.floor(p.x / cell), gy = Math.floor(p.y / cell);
+      var gx = Math.floor(p.x / cell);
+      var gy = Math.floor(p.y / cell);
       for (var dy = -radius; dy <= radius; dy++) {
         for (var dx = -radius; dx <= radius; dx++) {
-          var cx = gx + dx, cy = gy + dy;
-          if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) continue;
+          var cx = gx + dx;
+          var cy = gy + dy;
+          if (cx < 0 || cy < 0 || cx >= cols || cy >= rows) {
+            continue;
+          }
           var d2 = dx * dx + dy * dy;
-          var w = Math.exp(-d2 / (2 * radius));
           var i = cy * cols + cx;
-          grid[i] += w;
-          if (grid[i] > maxV) maxV = grid[i];
+          grid[i] += Math.exp(-d2 / (2 * radius));
+          if (grid[i] > maxV) {
+            maxV = grid[i];
+          }
         }
       }
     });
-    if (maxV > 0) {
-      for (var r = 0; r < rows; r++) {
-        for (var c = 0; c < cols; c++) {
-          var v = grid[r * cols + c] / maxV;
-          if (v < 0.04) continue;
-          ctx.fillStyle = _heatColor(v, 0.35 * Math.min(1, v + 0.3));
-          ctx.fillRect(c * cell, r * cell, cell, cell);
+    return { grid: grid, maxV: maxV };
+  }
+
+  function drawHeatmap(ctx, raw, W, H) {
+    var cell = 12;
+    var radius = 3;
+    var cols = Math.ceil(W / cell);
+    var rows = Math.ceil(H / cell);
+    var built = buildHeatGrid(raw, cols, rows, cell, radius);
+    if (built.maxV <= 0) {
+      return;
+    }
+    for (var r = 0; r < rows; r++) {
+      for (var c = 0; c < cols; c++) {
+        var v = built.grid[r * cols + c] / built.maxV;
+        if (v < 0.04) {
+          continue;
         }
+        ctx.fillStyle = _heatColor(v, 0.35 * Math.min(1, v + 0.3));
+        ctx.fillRect(c * cell, r * cell, cell, cell);
       }
     }
+  }
 
-    // ── Points bruts (semi-transparents) ──
+  function drawRawPoints(ctx, raw) {
     ctx.fillStyle = 'rgba(255,255,255,0.18)';
     raw.forEach(function (p) {
-      ctx.beginPath(); ctx.arc(p.x, p.y, 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, 1.5, 0, Math.PI * 2);
+      ctx.fill();
     });
+  }
 
-    // ── Scanpath : relie les fixations dans l'ordre temporel ──
-    var fx = fixations
-      .map(function (f) { return { x: f.details && f.details.x, y: f.details && f.details.y, d: f.duration }; })
-      .filter(function (f) { return Number.isFinite(f.x) && Number.isFinite(f.y); });
+  function fixationPoints(fixations) {
+    return fixations
+      .map(function (f) {
+        return { x: f.details && f.details.x, y: f.details && f.details.y, d: f.duration };
+      })
+      .filter(function (f) {
+        return Number.isFinite(f.x) && Number.isFinite(f.y);
+      });
+  }
 
+  function drawScanpath(ctx, fx) {
     ctx.strokeStyle = 'rgba(108,140,255,0.8)';
     ctx.lineWidth = 2;
     ctx.beginPath();
-    fx.forEach(function (f, i) { i === 0 ? ctx.moveTo(f.x, f.y) : ctx.lineTo(f.x, f.y); });
+    fx.forEach(function (f, i) {
+      if (i === 0) {
+        ctx.moveTo(f.x, f.y);
+      } else {
+        ctx.lineTo(f.x, f.y);
+      }
+    });
     ctx.stroke();
+  }
 
-    // ── Fixations : cercle ∝ durée + numéro d'ordre ──
+  function drawFixations(ctx, fx) {
     fx.forEach(function (f, i) {
       var rad = _clamp(6 + (f.d || 0) / 40, 7, 34);
       ctx.beginPath();
       ctx.arc(f.x, f.y, rad, 0, Math.PI * 2);
       ctx.fillStyle = 'rgba(78,205,196,0.30)';
       ctx.fill();
-      ctx.strokeStyle = '#4ecdc4'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.strokeStyle = '#4ecdc4';
+      ctx.lineWidth = 2;
+      ctx.stroke();
       ctx.fillStyle = '#fff';
       ctx.font = 'bold 12px Arial';
-      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
       ctx.fillText(String(i + 1), f.x, f.y);
     });
+  }
 
-    // ── Panneau d'info + bouton fermer ──
-    var info = document.createElement('div');
-    info.style.cssText =
-      'position:absolute;top:18px;left:18px;background:rgba(15,15,26,0.9);' +
-      'border:1px solid rgba(108,140,255,0.4);border-radius:10px;padding:14px 18px;font-size:.85rem;line-height:1.6;';
-    var meanConf = (function () {
-      var c = raw.filter(function (p) { return typeof p.confidence === 'number'; });
-      return c.length ? (c.reduce(function (s, p) { return s + p.confidence; }, 0) / c.length).toFixed(2) : '—';
-    })();
-    var moduleName = (session.session && session.session.id) ?
-      (raw[0] && raw[0].source_module) || '—' : '—';
-    info.innerHTML =
-      '<div style="font-weight:bold;color:#6c8cff;margin-bottom:6px;">Parcours du regard</div>' +
-      'Points : ' + raw.length + '<br>' +
-      'Fixations : ' + fx.length + '<br>' +
-      'Saccades : ' + events.filter(function (e){return e.type==='saccade';}).length + '<br>' +
-      'Confiance moy. : ' + meanConf + '<br>' +
-      'Moteur : ' + moduleName +
-      '<div style="margin-top:8px;color:#9aa6c0;font-size:.75rem;">' +
-      '⬤ heatmap densité · ● fixations (∝ durée) · — scanpath</div>';
-    overlay.appendChild(info);
+  function meanConfidence(raw) {
+    var withConf = raw.filter(function (p) {
+      return typeof p.confidence === 'number';
+    });
+    if (!withConf.length) {
+      return '—';
+    }
+    var sum = withConf.reduce(function (s, p) {
+      return s + p.confidence;
+    }, 0);
+    return (sum / withConf.length).toFixed(2);
+  }
 
+  function moduleLabel(session, raw) {
+    if (session.session && session.session.id) {
+      return (raw[0] && raw[0].source_module) || '—';
+    }
+    return '—';
+  }
+
+  function countSaccades(events) {
+    return events.filter(function (e) {
+      return e.type === 'saccade';
+    }).length;
+  }
+
+  function buildInfoPanel(session, raw, events, fx) {
+    var panel = document.createElement('div');
+    panel.classList.add('gv-info-panel');
+
+    var titleEl = document.createElement('div');
+    titleEl.classList.add('gv-info-title');
+    titleEl.textContent = 'Parcours du regard';
+    panel.appendChild(titleEl);
+
+    var statsLines = [
+      'Points : ' + raw.length,
+      'Fixations : ' + fx.length,
+      'Saccades : ' + countSaccades(events),
+      'Confiance moy. : ' + meanConfidence(raw),
+      'Moteur : ' + moduleLabel(session, raw),
+    ];
+    statsLines.forEach(function (line) {
+      var br = document.createElement('br');
+      panel.appendChild(br);
+      panel.appendChild(document.createTextNode(line));
+    });
+
+    var legend = document.createElement('div');
+    legend.classList.add('gv-info-legend');
+    legend.textContent = '⬤ heatmap densité · ● fixations (∝ durée) · — scanpath';
+    panel.appendChild(legend);
+
+    return panel;
+  }
+
+  function buildCloseButton() {
     var close = document.createElement('button');
+    close.classList.add('gv-close-btn');
     close.textContent = 'Fermer ✕';
-    close.style.cssText =
-      'position:absolute;top:18px;right:18px;background:#6c8cff;color:#fff;border:none;' +
-      'border-radius:8px;padding:10px 18px;font-weight:700;cursor:pointer;';
     close.addEventListener('click', hide);
-    overlay.appendChild(close);
+    return close;
+  }
 
+  function show(session) {
+    hide();
+    if (!session) {
+      return;
+    }
+    var raw = session.raw_gaze_data || [];
+    var events = session.events || [];
+    var fixations = events.filter(function (e) {
+      return e.type === 'fixation';
+    });
+
+    var overlay = document.createElement('div');
+    overlay.id = OVERLAY_ID;
+
+    var ctx = createCanvas(overlay);
+    var W = window.innerWidth;
+    var H = window.innerHeight;
+    var fx = fixationPoints(fixations);
+
+    drawHeatmap(ctx, raw, W, H);
+    drawRawPoints(ctx, raw);
+    drawScanpath(ctx, fx);
+    drawFixations(ctx, fx);
+
+    overlay.appendChild(buildInfoPanel(session, raw, events, fx));
+    overlay.appendChild(buildCloseButton());
     document.body.appendChild(overlay);
   }
 

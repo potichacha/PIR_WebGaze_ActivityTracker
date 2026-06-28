@@ -1,3 +1,18 @@
+/**
+ * barchart.js
+ *
+ * Graphique en barres D3 servant de stimulus interactif pour les tests de regard.
+ * Il affiche les ventes mensuelles d'un exercice et expose, en plus du rendu, des
+ * points d'entrée pensés pour le suivi du regard :
+ *   - getAOIs() renvoie les zones d'intérêt (barres + axes) en coordonnées écran ;
+ *   - setGazeMode / gazeHover / gazeDwelling / gazeLeave pilotent le retour visuel
+ *     déclenché par le regard plutôt que par la souris ;
+ *   - l'état interactif (zoom vertical, trimestres masqués) est exposé via
+ *     getState() pour être journalisé dans viz_state.
+ *
+ * La légende est cliquable (filtre par trimestre) et un zoom vertical est
+ * disponible via Ctrl+molette.
+ */
 const BarChart = (function () {
   'use strict';
 
@@ -27,63 +42,77 @@ const BarChart = (function () {
   let _svg = null;
   let _resizeHandler = null;
   let _tooltip = null;
-  let _aoiCache = null;      // invalidated on each re-render
+  let _aoiCache = null;
   let _gazeModeActive = false;
 
-  // État interactif (reflété dans viz_state du log) :
-  let _hiddenQuarters = {};  // { T2: true } = trimestre masqué (filtre)
-  let _zoom = 1;             // facteur de zoom vertical (échelle des valeurs)
-  let _onStateChange = null; // callback déclenché à chaque changement d'état
+  let _hiddenQuarters = {};
+  let _zoom = 1;
+  let _onStateChange = null;
 
   function _visibleData() {
     return DATA.filter(d => !_hiddenQuarters[d.quarter]);
   }
+
   function _notifyState() {
     _aoiCache = null;
     if (typeof _onStateChange === 'function') {
-      try { _onStateChange(getState()); } catch (_) {}
+      try {
+        _onStateChange(getState());
+      } catch (_) {}
     }
   }
 
-  // ─── Public API ──────────────────────────────────────────────────────────────
+  function barId(d) {
+    return `bar-${d.label}`;
+  }
+
+  function fillTooltipContent(node, d) {
+    while (node.firstChild) {
+      node.removeChild(node.firstChild);
+    }
+    const title = document.createElement('strong');
+    title.textContent = d.label + ' 2024';
+    node.appendChild(title);
+    node.appendChild(document.createElement('br'));
+    node.appendChild(document.createTextNode('Ventes : ' + d.value.toLocaleString('fr-FR') + ' €'));
+    node.appendChild(document.createElement('br'));
+    node.appendChild(document.createTextNode('Trimestre : ' + d.quarter));
+  }
 
   function init(containerId) {
     _containerId = containerId;
 
-    if (_resizeHandler) window.removeEventListener('resize', _resizeHandler);
+    if (_resizeHandler) {
+      window.removeEventListener('resize', _resizeHandler);
+    }
 
-    if (!document.getElementById('barchart-tooltip')) {
+    if (document.getElementById('barchart-tooltip')) {
+      _tooltip = d3.select('#barchart-tooltip');
+    } else {
       _tooltip = d3.select('body')
         .append('div')
         .attr('id', 'barchart-tooltip')
         .attr('class', 'barchart-tooltip')
         .style('opacity', 0);
-    } else {
-      _tooltip = d3.select('#barchart-tooltip');
     }
 
     _render();
 
-    _resizeHandler = _debounce(function () { _aoiCache = null; _render(); }, 300);
+    _resizeHandler = _debounce(function () {
+      _aoiCache = null;
+      _render();
+    }, 300);
     window.addEventListener('resize', _resizeHandler);
   }
 
-  /**
-   * Returns bounding rectangles (viewport coords) of each bar + both axes.
-   * Result is cached and invalidated after each re-render or resize.
-   * @returns {Array<{id, label, x, y, width, height}>}
-   */
-  function getAOIs() {
-    if (_aoiCache) return _aoiCache;
-    if (!_svg) return [];
-
-    const aois = [];
-
+  function collectBarAOIs(aois) {
     _svg.selectAll('.barchart-bar').each(function (d) {
       const r = this.getBoundingClientRect();
-      if (r.width === 0 && r.height === 0) return;
+      if (r.width === 0 && r.height === 0) {
+        return;
+      }
       aois.push({
-        id: `bar-${d.label}`,
+        id: barId(d),
         label: `Barre ${d.label} — ${d.value.toLocaleString('fr-FR')} €`,
         x: r.left,
         y: r.top,
@@ -91,7 +120,9 @@ const BarChart = (function () {
         height: r.height,
       });
     });
+  }
 
+  function collectAxisAOIs(aois) {
     const xAxisNode = _svg.select('.barchart-x-axis').node();
     if (xAxisNode) {
       const r = xAxisNode.getBoundingClientRect();
@@ -100,7 +131,6 @@ const BarChart = (function () {
         x: r.left, y: r.top, width: r.width, height: Math.max(r.height, 20),
       });
     }
-
     const yAxisNode = _svg.select('.barchart-y-axis').node();
     if (yAxisNode) {
       const r = yAxisNode.getBoundingClientRect();
@@ -109,70 +139,86 @@ const BarChart = (function () {
         x: r.left, y: r.top, width: Math.max(r.width, 20), height: r.height,
       });
     }
+  }
 
+  function getAOIs() {
+    if (_aoiCache) {
+      return _aoiCache;
+    }
+    if (!_svg) {
+      return [];
+    }
+    const aois = [];
+    collectBarAOIs(aois);
+    collectAxisAOIs(aois);
     _aoiCache = aois;
     return aois;
   }
 
-  /**
-   * Enable/disable mouse hover on bars.
-   * Call setGazeMode(true) when gaze tracking starts so mouse doesn't conflict.
-   */
   function setGazeMode(enabled) {
     _gazeModeActive = enabled;
     if (_svg) {
-      _svg.selectAll('.barchart-bar')
-        .style('pointer-events', enabled ? 'none' : 'all');
+      let pointerEvents = 'all';
+      if (enabled) {
+        pointerEvents = 'none';
+      }
+      _svg.selectAll('.barchart-bar').style('pointer-events', pointerEvents);
     }
-    if (!enabled) gazeLeave();
+    if (!enabled) {
+      gazeLeave();
+    }
   }
 
-  /**
-   * Visual feedback while the user is dwelling on a bar (0 ≤ progress ≤ 1).
-   * Darkens the target bar slightly to signal the interaction is registering.
-   */
-  function gazeDwelling(barId, progress) {
-    if (!_svg) return;
+  function gazeDwelling(targetId, progress) {
+    if (!_svg) {
+      return;
+    }
     _svg.selectAll('.barchart-bar').attr('opacity', function (d) {
-      if (!barId || `bar-${d.label}` !== barId) return 1;
+      if (!targetId || barId(d) !== targetId) {
+        return 1;
+      }
       return 1 - 0.3 * progress;
     });
   }
 
-  /**
-   * Trigger the hover state on a specific bar at gaze position (x, y).
-   */
-  function gazeHover(barId, x, y) {
-    if (!_svg) return;
-    const d = DATA.find(d => `bar-${d.label}` === barId);
-    if (!d) return;
+  function gazeHover(targetId, x, y) {
+    if (!_svg) {
+      return;
+    }
+    const d = DATA.find(item => barId(item) === targetId);
+    if (!d) {
+      return;
+    }
 
-    _svg.selectAll('.barchart-bar')
-      .attr('opacity', b => `bar-${b.label}` === barId ? 0.72 : 1);
+    _svg.selectAll('.barchart-bar').attr('opacity', function (b) {
+      if (barId(b) === targetId) {
+        return 0.72;
+      }
+      return 1;
+    });
 
+    fillTooltipContent(_tooltip.node(), d);
     _tooltip
       .style('opacity', 0.95)
-      .html(
-        `<strong>${d.label} 2024</strong><br/>` +
-        `Ventes&nbsp;: ${d.value.toLocaleString('fr-FR')} €<br/>` +
-        `Trimestre&nbsp;: ${d.quarter}`
-      )
       .style('left', (x + 16) + 'px')
       .style('top',  (y - 50) + 'px');
   }
 
-  /** Hide tooltip and reset all bar opacities. */
   function gazeLeave() {
-    if (!_svg) return;
+    if (!_svg) {
+      return;
+    }
     _svg.selectAll('.barchart-bar').attr('opacity', 1);
-    if (_tooltip) _tooltip.style('opacity', 0);
+    if (_tooltip) {
+      _tooltip.style('opacity', 0);
+    }
   }
-
-  // ─── Rendering ───────────────────────────────────────────────────────────────
 
   function _render() {
     const container = document.getElementById(_containerId);
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     d3.select(`#${_containerId}`).selectAll('svg').remove();
 
@@ -197,13 +243,11 @@ const BarChart = (function () {
       .range([0, chartW])
       .padding(0.25);
 
-    // Le zoom réduit le maximum de l'axe → les barres paraissent plus hautes.
     const dataMax = d3.max(VDATA, d => d.value) || 1;
     const yScale = d3.scaleLinear()
       .domain([0, (dataMax * 1.12) / _zoom])
       .range([chartH, 0]);
 
-    // Horizontal grid lines
     g.append('g')
       .attr('class', 'barchart-grid')
       .call(
@@ -213,7 +257,6 @@ const BarChart = (function () {
           .ticks(5)
       );
 
-    // X axis
     g.append('g')
       .attr('class', 'barchart-x-axis')
       .attr('transform', `translate(0,${chartH})`)
@@ -222,7 +265,6 @@ const BarChart = (function () {
         .style('font-size', '12px')
         .style('fill', '#444');
 
-    // Y axis
     g.append('g')
       .attr('class', 'barchart-y-axis')
       .call(
@@ -234,7 +276,6 @@ const BarChart = (function () {
         .style('font-size', '12px')
         .style('fill', '#444');
 
-    // Axis labels
     g.append('text')
       .attr('class', 'barchart-axis-label')
       .attr('transform', 'rotate(-90)')
@@ -250,7 +291,6 @@ const BarChart = (function () {
       .attr('text-anchor', 'middle')
       .text('Mois');
 
-    // Chart title
     _svg.append('text')
       .attr('class', 'barchart-title')
       .attr('x', totalWidth / 2)
@@ -258,7 +298,6 @@ const BarChart = (function () {
       .attr('text-anchor', 'middle')
       .text('Ventes mensuelles — Exercice 2024');
 
-    // Bars
     g.selectAll('.barchart-bar')
       .data(VDATA)
       .enter()
@@ -273,13 +312,9 @@ const BarChart = (function () {
       .attr('rx', 3)
       .on('mouseover', function (event, d) {
         d3.select(this).attr('opacity', 0.72);
+        fillTooltipContent(_tooltip.node(), d);
         _tooltip
           .style('opacity', 0.95)
-          .html(
-            `<strong>${d.label} 2024</strong><br/>` +
-            `Ventes&nbsp;: ${d.value.toLocaleString('fr-FR')} €<br/>` +
-            `Trimestre&nbsp;: ${d.quarter}`
-          )
           .style('left', (event.clientX + 14) + 'px')
           .style('top', (event.clientY - 44) + 'px');
       })
@@ -293,7 +328,6 @@ const BarChart = (function () {
         _tooltip.style('opacity', 0);
       });
 
-    // Value labels on top of bars
     g.selectAll('.barchart-bar-value')
       .data(VDATA)
       .enter()
@@ -304,7 +338,12 @@ const BarChart = (function () {
       .attr('text-anchor', 'middle')
       .text(d => `${(d.value / 1000).toFixed(1)}k`);
 
-    // Legend — cliquable : filtre par trimestre (clic = masquer/afficher).
+    renderLegend(margin, chartW, totalHeight);
+    enableWheelZoom();
+    renderZoomIndicator(totalWidth);
+  }
+
+  function renderLegend(margin, chartW, totalHeight) {
     const quarters = [...new Set(DATA.map(d => d.quarter))];
     const legendW = quarters.length * 130;
     const legendG = _svg.append('g')
@@ -313,10 +352,16 @@ const BarChart = (function () {
 
     quarters.forEach((q, i) => {
       const hidden = !!_hiddenQuarters[q];
+      let entryOpacity = 1;
+      let textDecoration = 'none';
+      if (hidden) {
+        entryOpacity = 0.4;
+        textDecoration = 'line-through';
+      }
       const entry = legendG.append('g')
         .attr('transform', `translate(${i * 130}, 0)`)
         .style('cursor', 'pointer')
-        .style('opacity', hidden ? 0.4 : 1)
+        .style('opacity', entryOpacity)
         .on('click', function () {
           _hiddenQuarters[q] = !_hiddenQuarters[q];
           _render();
@@ -329,31 +374,37 @@ const BarChart = (function () {
         .attr('x', 16).attr('y', 11)
         .style('font-size', '11px')
         .style('fill', '#555')
-        .style('text-decoration', hidden ? 'line-through' : 'none')
+        .style('text-decoration', textDecoration)
         .text(`Trimestre ${q}`);
     });
+  }
 
-    // Zoom vertical à la molette (Ctrl+molette pour ne pas gêner le scroll page).
+  function enableWheelZoom() {
     _svg.on('wheel', function (event) {
-      if (!event.ctrlKey) return;
+      if (!event.ctrlKey) {
+        return;
+      }
       event.preventDefault();
-      const factor = event.deltaY < 0 ? 1.15 : 1 / 1.15;
+      let factor = 1 / 1.15;
+      if (event.deltaY < 0) {
+        factor = 1.15;
+      }
       _zoom = Math.max(1, Math.min(5, _zoom * factor));
       _render();
       _notifyState();
     });
-
-    // Indicateur de zoom (si ≠ 1)
-    if (_zoom !== 1) {
-      _svg.append('text')
-        .attr('x', totalWidth - 12).attr('y', 48)
-        .attr('text-anchor', 'end')
-        .style('font-size', '11px').style('fill', '#888')
-        .text(`zoom ×${_zoom.toFixed(1)} (Ctrl+molette)`);
-    }
   }
 
-  // ─── Utils ────────────────────────────────────────────────────────────────────
+  function renderZoomIndicator(totalWidth) {
+    if (_zoom === 1) {
+      return;
+    }
+    _svg.append('text')
+      .attr('x', totalWidth - 12).attr('y', 48)
+      .attr('text-anchor', 'end')
+      .style('font-size', '11px').style('fill', '#888')
+      .text(`zoom ×${_zoom.toFixed(1)} (Ctrl+molette)`);
+  }
 
   function _debounce(fn, wait) {
     let timer;
@@ -363,8 +414,6 @@ const BarChart = (function () {
     };
   }
 
-  // ─── État interactif (exposé pour le log viz_state) ───────────────────────────
-
   function getState() {
     return {
       zoom: +_zoom.toFixed(2),
@@ -373,10 +422,35 @@ const BarChart = (function () {
       total_bars: DATA.length,
     };
   }
-  function setZoom(z) { _zoom = Math.max(1, Math.min(5, +z || 1)); if (_containerId) _render(); _notifyState(); }
-  function toggleQuarter(q) { _hiddenQuarters[q] = !_hiddenQuarters[q]; if (_containerId) _render(); _notifyState(); }
-  function resetView() { _hiddenQuarters = {}; _zoom = 1; if (_containerId) _render(); _notifyState(); }
-  function onStateChange(cb) { _onStateChange = cb; }
+
+  function setZoom(z) {
+    _zoom = Math.max(1, Math.min(5, +z || 1));
+    if (_containerId) {
+      _render();
+    }
+    _notifyState();
+  }
+
+  function toggleQuarter(q) {
+    _hiddenQuarters[q] = !_hiddenQuarters[q];
+    if (_containerId) {
+      _render();
+    }
+    _notifyState();
+  }
+
+  function resetView() {
+    _hiddenQuarters = {};
+    _zoom = 1;
+    if (_containerId) {
+      _render();
+    }
+    _notifyState();
+  }
+
+  function onStateChange(cb) {
+    _onStateChange = cb;
+  }
 
   return {
     init, getAOIs, setGazeMode, gazeDwelling, gazeHover, gazeLeave, data: DATA,
@@ -384,5 +458,6 @@ const BarChart = (function () {
   };
 })();
 
-// Exposition globale explicite (const top-level n'est PAS une propriété de window).
-if (typeof window !== 'undefined') window.BarChart = BarChart;
+if (typeof window !== 'undefined') {
+  window.BarChart = BarChart;
+}

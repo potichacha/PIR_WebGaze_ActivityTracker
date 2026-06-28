@@ -1,18 +1,19 @@
 /**
- * scatterchart.js — Scatter plot D3 avec AOI (US-3.4)
+ * scatterchart.js
  *
- * API publique :
- *   ScatterChart.init(containerId)
- *   ScatterChart.getAOIs()       → [{id, label, x, y, width, height}]
- *   ScatterChart.setGazeMode(bool)
- *   ScatterChart.gazeDwelling(pointId, progress)
- *   ScatterChart.gazeHover(pointId, x, y)
- *   ScatterChart.gazeLeave()
+ * Nuage de points D3 (PIB par habitant contre espérance de vie, par pays) servant
+ * de stimulus interactif pour les tests de regard. En plus du rendu, il expose les
+ * points d'entrée nécessaires au suivi du regard :
+ *   - getAOIs() renvoie une zone d'intérêt circulaire autour de chaque point, plus
+ *     les axes et la légende, en coordonnées écran ;
+ *   - setGazeMode / gazeHover / gazeDwelling / gazeLeave pilotent la mise en
+ *     évidence et l'infobulle à partir du regard plutôt que de la souris.
+ *
+ * Le rendu reste interactif à la souris tant que le mode regard n'est pas activé.
  */
 const ScatterChart = (function () {
   'use strict';
 
-  // Jeu de données : pays (PIB/habitant vs espérance de vie)
   const DATA = [
     { id: 'fr',  label: 'France',        gdp: 42330, life: 82.3, region: 'Europe'   },
     { id: 'de',  label: 'Allemagne',      gdp: 46260, life: 80.9, region: 'Europe'   },
@@ -55,54 +56,76 @@ const ScatterChart = (function () {
   };
 
   const POINT_RADIUS = 7;
-  const AOI_RADIUS   = 30; // rayon AOI autour de chaque point (px viewport)
+  const AOI_RADIUS = 30;
 
-  let _containerId   = null;
-  let _svg           = null;
-  let _g             = null;
-  let _xScale        = null;
-  let _yScale        = null;
-  let _margin        = null;
-  let _chartW        = 0;
-  let _chartH        = 0;
-  let _tooltip       = null;
-  let _aoiCache      = null;
+  let _containerId = null;
+  let _svg = null;
+  let _g = null;
+  let _xScale = null;
+  let _yScale = null;
+  let _margin = null;
+  let _chartW = 0;
+  let _chartH = 0;
+  let _tooltip = null;
+  let _aoiCache = null;
   let _gazeModeActive = false;
   let _resizeHandler = null;
-  let _hoveredId     = null;
+  let _hoveredId = null;
 
-  // ─── Public API ──────────────────────────────────────────────────────────────
+  function pointColor(d) {
+    return REGION_COLORS[d.region] || '#888';
+  }
+
+  function fillTooltipContent(node, d) {
+    while (node.firstChild) {
+      node.removeChild(node.firstChild);
+    }
+    var title = document.createElement('strong');
+    title.textContent = d.label;
+    node.appendChild(title);
+    node.appendChild(document.createElement('br'));
+    node.appendChild(document.createTextNode('Région : ' + d.region));
+    node.appendChild(document.createElement('br'));
+    node.appendChild(document.createTextNode('PIB/hab : '));
+    var gdp = document.createElement('strong');
+    gdp.textContent = d.gdp.toLocaleString('fr-FR') + ' $';
+    node.appendChild(gdp);
+    node.appendChild(document.createElement('br'));
+    node.appendChild(document.createTextNode('Espérance de vie : '));
+    var life = document.createElement('strong');
+    life.textContent = d.life + ' ans';
+    node.appendChild(life);
+  }
 
   function init(containerId) {
     _containerId = containerId;
-    if (_resizeHandler) window.removeEventListener('resize', _resizeHandler);
+    if (_resizeHandler) {
+      window.removeEventListener('resize', _resizeHandler);
+    }
 
-    if (!document.getElementById('scatterchart-tooltip')) {
+    if (document.getElementById('scatterchart-tooltip')) {
+      _tooltip = d3.select('#scatterchart-tooltip');
+    } else {
       _tooltip = d3.select('body')
         .append('div')
         .attr('id', 'scatterchart-tooltip')
         .attr('class', 'scatterchart-tooltip')
         .style('opacity', 0);
-    } else {
-      _tooltip = d3.select('#scatterchart-tooltip');
     }
 
     _render();
 
-    _resizeHandler = _debounce(function () { _aoiCache = null; _render(); }, 300);
+    _resizeHandler = _debounce(function () {
+      _aoiCache = null;
+      _render();
+    }, 300);
     window.addEventListener('resize', _resizeHandler);
   }
 
-  function getAOIs() {
-    if (_aoiCache) return _aoiCache;
-    if (!_svg || !_xScale || !_yScale || !_margin) return [];
-
-    var aois = [];
-    var svgRect = _svg.node().getBoundingClientRect();
-
+  function collectPointAOIs(aois, svgRect) {
     DATA.forEach(function (d) {
       var cx = svgRect.left + _margin.left + _xScale(d.gdp);
-      var cy = svgRect.top  + _margin.top  + _yScale(d.life);
+      var cy = svgRect.top + _margin.top + _yScale(d.life);
       aois.push({
         id:     'point-' + d.id,
         label:  d.label,
@@ -114,8 +137,9 @@ const ScatterChart = (function () {
         _cy: cy,
       });
     });
+  }
 
-    // Axes
+  function collectChromeAOIs(aois) {
     var xAxisNode = _svg.select('.scatter-x-axis').node();
     if (xAxisNode) {
       var r = xAxisNode.getBoundingClientRect();
@@ -134,51 +158,94 @@ const ScatterChart = (function () {
       aois.push({ id: 'legend', label: 'Légende régions',
         x: r3.left, y: r3.top, width: r3.width, height: r3.height });
     }
+  }
 
+  function getAOIs() {
+    if (_aoiCache) {
+      return _aoiCache;
+    }
+    if (!_svg || !_xScale || !_yScale || !_margin) {
+      return [];
+    }
+    var aois = [];
+    collectPointAOIs(aois, _svg.node().getBoundingClientRect());
+    collectChromeAOIs(aois);
     _aoiCache = aois;
     return aois;
   }
 
   function setGazeMode(enabled) {
     _gazeModeActive = enabled;
-    if (!enabled) gazeLeave();
+    if (!enabled) {
+      gazeLeave();
+    }
   }
 
   function gazeDwelling(pointId, progress) {
-    if (!_svg) return;
+    if (!_svg) {
+      return;
+    }
     if (!pointId) {
       _svg.selectAll('.scatter-point').attr('stroke-width', 1.5).attr('stroke', '#fff');
       return;
     }
     var id = pointId.replace('point-', '');
     _svg.selectAll('.scatter-point')
-      .attr('stroke-width', function (d) { return d.id === id ? 1.5 + 3 * progress : 1.5; })
-      .attr('stroke',       function (d) { return d.id === id ? '#f39c12' : '#fff'; });
+      .attr('stroke-width', function (d) {
+        if (d.id === id) {
+          return 1.5 + 3 * progress;
+        }
+        return 1.5;
+      })
+      .attr('stroke', function (d) {
+        if (d.id === id) {
+          return '#f39c12';
+        }
+        return '#fff';
+      });
+  }
+
+  function emphasizePoint(id) {
+    _svg.selectAll('.scatter-point')
+      .attr('opacity', function (pt) {
+        if (pt.id === id) {
+          return 1;
+        }
+        return 0.35;
+      })
+      .attr('r', function (pt) {
+        if (pt.id === id) {
+          return POINT_RADIUS + 3;
+        }
+        return POINT_RADIUS;
+      });
+  }
+
+  function showTooltip(d, x, y) {
+    if (!_tooltip) {
+      return;
+    }
+    fillTooltipContent(_tooltip.node(), d);
+    _tooltip
+      .style('opacity', 0.95)
+      .style('left', (x + 16) + 'px')
+      .style('top', (y - 60) + 'px');
   }
 
   function gazeHover(pointId, x, y) {
-    if (!_svg) return;
+    if (!_svg) {
+      return;
+    }
     var id = pointId.replace('point-', '');
-    var d  = DATA.find(function (d) { return d.id === id; });
-    if (!d) return;
+    var d = DATA.find(function (item) { return item.id === id; });
+    if (!d) {
+      return;
+    }
     if (_hoveredId !== id) {
-      _svg.selectAll('.scatter-point')
-        .attr('opacity', function (pt) { return pt.id === id ? 1 : 0.35; })
-        .attr('r',       function (pt) { return pt.id === id ? POINT_RADIUS + 3 : POINT_RADIUS; });
+      emphasizePoint(id);
       _hoveredId = id;
     }
-    if (_tooltip) {
-      _tooltip
-        .style('opacity', 0.95)
-        .html(
-          '<strong>' + d.label + '</strong><br/>' +
-          'Région : ' + d.region + '<br/>' +
-          'PIB/hab : <strong>' + d.gdp.toLocaleString('fr-FR') + ' $</strong><br/>' +
-          'Espérance de vie : <strong>' + d.life + ' ans</strong>'
-        )
-        .style('left', (x + 16) + 'px')
-        .style('top',  (y - 60) + 'px');
-    }
+    showTooltip(d, x, y);
   }
 
   function gazeLeave() {
@@ -189,27 +256,36 @@ const ScatterChart = (function () {
         .attr('stroke-width', 1.5)
         .attr('stroke', '#fff');
     }
-    if (_tooltip) _tooltip.style('opacity', 0);
+    if (_tooltip) {
+      _tooltip.style('opacity', 0);
+    }
     _hoveredId = null;
   }
 
-  // ─── Rendering ───────────────────────────────────────────────────────────────
+  function xTickFormat(d) {
+    if (d >= 1000) {
+      return (d / 1000).toFixed(0) + 'k';
+    }
+    return d;
+  }
 
   function _render() {
     var container = document.getElementById(_containerId);
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     d3.select('#' + _containerId).selectAll('svg').remove();
 
-    var totalWidth  = container.clientWidth  || 800;
+    var totalWidth = container.clientWidth || 800;
     var totalHeight = container.clientHeight || 480;
     _margin = { top: 50, right: 160, bottom: 70, left: 80 };
-    _chartW = totalWidth  - _margin.left - _margin.right;
-    _chartH = totalHeight - _margin.top  - _margin.bottom;
+    _chartW = totalWidth - _margin.left - _margin.right;
+    _chartH = totalHeight - _margin.top - _margin.bottom;
 
     _svg = d3.select('#' + _containerId)
       .append('svg')
-      .attr('width',  totalWidth)
+      .attr('width', totalWidth)
       .attr('height', totalHeight);
 
     _g = _svg.append('g')
@@ -223,7 +299,6 @@ const ScatterChart = (function () {
       .domain([55, 87])
       .range([_chartH, 0]);
 
-    // Grid
     _g.append('g')
       .attr('class', 'scatter-grid scatter-grid-x')
       .attr('transform', 'translate(0,' + _chartH + ')')
@@ -233,22 +308,17 @@ const ScatterChart = (function () {
       .attr('class', 'scatter-grid scatter-grid-y')
       .call(d3.axisLeft(_yScale).tickSize(-_chartW).tickFormat('').ticks(6));
 
-    // X axis
     _g.append('g')
       .attr('class', 'scatter-x-axis')
       .attr('transform', 'translate(0,' + _chartH + ')')
-      .call(d3.axisBottom(_xScale).ticks(6).tickFormat(function (d) {
-        return d >= 1000 ? (d / 1000).toFixed(0) + 'k' : d;
-      }))
+      .call(d3.axisBottom(_xScale).ticks(6).tickFormat(xTickFormat))
       .selectAll('text').style('font-size', '11px').style('fill', '#555');
 
-    // Y axis
     _g.append('g')
       .attr('class', 'scatter-y-axis')
       .call(d3.axisLeft(_yScale).ticks(6).tickFormat(function (d) { return d + ' ans'; }))
       .selectAll('text').style('font-size', '11px').style('fill', '#555');
 
-    // Axis labels
     _g.append('text')
       .attr('class', 'scatter-axis-label')
       .attr('x', _chartW / 2)
@@ -264,7 +334,6 @@ const ScatterChart = (function () {
       .attr('text-anchor', 'middle')
       .text('Espérance de vie (ans)');
 
-    // Title
     _svg.append('text')
       .attr('class', 'scatter-title')
       .attr('x', (_margin.left + _chartW / 2))
@@ -272,51 +341,56 @@ const ScatterChart = (function () {
       .attr('text-anchor', 'middle')
       .text('PIB/habitant vs Espérance de vie — 30 pays (2023)');
 
-    // Points
+    renderPoints();
+    renderOutlierLabels();
+    renderLegend();
+
+    _aoiCache = null;
+  }
+
+  function renderPoints() {
     _g.selectAll('.scatter-point')
       .data(DATA)
       .enter()
       .append('circle')
       .attr('class', 'scatter-point')
-      .attr('cx',    function (d) { return _xScale(d.gdp); })
-      .attr('cy',    function (d) { return _yScale(d.life); })
-      .attr('r',     POINT_RADIUS)
-      .attr('fill',  function (d) { return REGION_COLORS[d.region] || '#888'; })
+      .attr('cx', function (d) { return _xScale(d.gdp); })
+      .attr('cy', function (d) { return _yScale(d.life); })
+      .attr('r', POINT_RADIUS)
+      .attr('fill', pointColor)
       .attr('opacity', 0.85)
       .attr('stroke', '#fff')
       .attr('stroke-width', 1.5)
       .style('cursor', 'pointer')
       .on('mouseover', function (event, d) {
-        if (_gazeModeActive) return;
+        if (_gazeModeActive) {
+          return;
+        }
         d3.select(this).attr('r', POINT_RADIUS + 3).attr('opacity', 1);
         _svg.selectAll('.scatter-point').filter(function (pt) { return pt.id !== d.id; })
           .attr('opacity', 0.35);
-        if (_tooltip) {
-          _tooltip
-            .style('opacity', 0.95)
-            .html(
-              '<strong>' + d.label + '</strong><br/>' +
-              'Région : ' + d.region + '<br/>' +
-              'PIB/hab : <strong>' + d.gdp.toLocaleString('fr-FR') + ' $</strong><br/>' +
-              'Espérance de vie : <strong>' + d.life + ' ans</strong>'
-            )
-            .style('left', (event.clientX + 16) + 'px')
-            .style('top',  (event.clientY - 60) + 'px');
-        }
+        showTooltip(d, event.clientX, event.clientY);
       })
       .on('mousemove', function (event) {
-        if (_gazeModeActive || !_tooltip) return;
+        if (_gazeModeActive || !_tooltip) {
+          return;
+        }
         _tooltip
           .style('left', (event.clientX + 16) + 'px')
-          .style('top',  (event.clientY - 60) + 'px');
+          .style('top', (event.clientY - 60) + 'px');
       })
       .on('mouseout', function () {
-        if (_gazeModeActive) return;
+        if (_gazeModeActive) {
+          return;
+        }
         _svg.selectAll('.scatter-point').attr('opacity', 0.85).attr('r', POINT_RADIUS);
-        if (_tooltip) _tooltip.style('opacity', 0);
+        if (_tooltip) {
+          _tooltip.style('opacity', 0);
+        }
       });
+  }
 
-    // Labels sur les points outliers notables
+  function renderOutlierLabels() {
     var labeled = ['no', 'ch', 'sg', 'jp', 'in', 'ng'];
     _g.selectAll('.scatter-label')
       .data(DATA.filter(function (d) { return labeled.indexOf(d.id) !== -1; }))
@@ -329,10 +403,11 @@ const ScatterChart = (function () {
       .style('fill', '#555')
       .style('pointer-events', 'none')
       .text(function (d) { return d.label; });
+  }
 
-    // Légende régions
-    var regions  = Object.keys(REGION_COLORS);
-    var legendG  = _svg.append('g')
+  function renderLegend() {
+    var regions = Object.keys(REGION_COLORS);
+    var legendG = _svg.append('g')
       .attr('class', 'scatter-legend')
       .attr('transform', 'translate(' + (_margin.left + _chartW + 16) + ',' + _margin.top + ')');
 
@@ -351,16 +426,19 @@ const ScatterChart = (function () {
         .style('font-size', '11px').style('fill', '#555')
         .text(region);
     });
-
-    _aoiCache = null;
   }
 
   function _debounce(fn, wait) {
     var timer;
-    return function () { clearTimeout(timer); timer = setTimeout(fn, wait); };
+    return function () {
+      clearTimeout(timer);
+      timer = setTimeout(fn, wait);
+    };
   }
 
   return { init, getAOIs, setGazeMode, gazeDwelling, gazeHover, gazeLeave, data: DATA };
 })();
 
-if (typeof window !== 'undefined') window.ScatterChart = ScatterChart;
+if (typeof window !== 'undefined') {
+  window.ScatterChart = ScatterChart;
+}

@@ -1,3 +1,16 @@
+/**
+ * linechart.js
+ *
+ * Graphique en courbes D3 (températures mensuelles de deux villes) servant de
+ * stimulus interactif pour les tests de regard. En plus du rendu, il expose les
+ * points d'entrée nécessaires au suivi du regard :
+ *   - getAOIs() renvoie une bande verticale par mois (zone d'intérêt de dwell),
+ *     plus les axes et la légende, en coordonnées écran ;
+ *   - setGazeMode / gazeHover / gazeDwelling / gazeLeave pilotent le retour visuel
+ *     (bande de survol, ligne de focus, infobulle) à partir du regard.
+ *
+ * Le rendu reste interactif à la souris tant que le mode regard n'est pas activé.
+ */
 const LineChart = (function () {
   'use strict';
 
@@ -32,108 +45,119 @@ const LineChart = (function () {
   let _aoiCache     = null;
   let _gazeModeActive = false;
 
-  // ─── Public API ──────────────────────────────────────────────────────────────
+  function pointerEventsFor(gazeEnabled) {
+    if (gazeEnabled) {
+      return 'none';
+    }
+    return 'all';
+  }
 
   function init(containerId) {
     _containerId = containerId;
-    if (_resizeHandler) window.removeEventListener('resize', _resizeHandler);
+    if (_resizeHandler) {
+      window.removeEventListener('resize', _resizeHandler);
+    }
 
-    if (!document.getElementById('linechart-tooltip')) {
+    if (document.getElementById('linechart-tooltip')) {
+      _tooltip = d3.select('#linechart-tooltip');
+    } else {
       _tooltip = d3.select('body')
         .append('div')
         .attr('id', 'linechart-tooltip')
         .attr('class', 'linechart-tooltip')
         .style('opacity', 0);
-    } else {
-      _tooltip = d3.select('#linechart-tooltip');
     }
 
     _render();
 
-    _resizeHandler = _debounce(function () { _aoiCache = null; _render(); }, 300);
+    _resizeHandler = _debounce(function () {
+      _aoiCache = null;
+      _render();
+    }, 300);
     window.addEventListener('resize', _resizeHandler);
   }
 
-  /**
-   * Returns AOIs: one vertical band per month + x-axis + y-axis + legend.
-   * Column bands (id = "col-<month>") are the interactive zones for gaze dwell.
-   */
-  function getAOIs() {
-    if (_aoiCache) return _aoiCache;
-    if (!_svg || !_xScale || !_margin) return [];
-
-    const aois = [];
+  function collectMonthAOIs(aois) {
     const svgRect = _svg.node().getBoundingClientRect();
     const step = _xScale.step();
-
     MONTHS.forEach(function (month) {
       const xLocal = _xScale(month) - step / 2;
       aois.push({
         id: 'col-' + month,
         label: 'Colonne ' + month,
         x: svgRect.left + _margin.left + xLocal,
-        y: svgRect.top  + _margin.top,
-        width:  step,
+        y: svgRect.top + _margin.top,
+        width: step,
         height: _chartH,
       });
     });
+  }
 
+  function collectChromeAOIs(aois) {
     const xAxisNode = _svg.select('.linechart-x-axis').node();
     if (xAxisNode) {
       const r = xAxisNode.getBoundingClientRect();
       aois.push({ id: 'x-axis', label: 'Axe X — Mois',
         x: r.left, y: r.top, width: r.width, height: Math.max(r.height, 20) });
     }
-
     const yAxisNode = _svg.select('.linechart-y-axis').node();
     if (yAxisNode) {
       const r = yAxisNode.getBoundingClientRect();
       aois.push({ id: 'y-axis', label: 'Axe Y — Température (°C)',
         x: r.left, y: r.top, width: Math.max(r.width, 20), height: r.height });
     }
-
     const legendNode = _svg.select('.linechart-legend').node();
     if (legendNode) {
       const r = legendNode.getBoundingClientRect();
       aois.push({ id: 'legend', label: 'Légende',
         x: r.left, y: r.top, width: r.width, height: r.height });
     }
+  }
 
+  function getAOIs() {
+    if (_aoiCache) {
+      return _aoiCache;
+    }
+    if (!_svg || !_xScale || !_margin) {
+      return [];
+    }
+    const aois = [];
+    collectMonthAOIs(aois);
+    collectChromeAOIs(aois);
     _aoiCache = aois;
     return aois;
   }
 
-  /**
-   * Enable / disable mouse hover on the chart overlay.
-   * Call setGazeMode(true) when gaze tracking is active.
-   */
   function setGazeMode(enabled) {
     _gazeModeActive = enabled;
     if (_svg) {
-      _svg.select('.linechart-overlay')
-        .style('pointer-events', enabled ? 'none' : 'all');
+      _svg.select('.linechart-overlay').style('pointer-events', pointerEventsFor(enabled));
     }
-    if (!enabled) gazeLeave();
+    if (!enabled) {
+      gazeLeave();
+    }
   }
 
-  /**
-   * Visual feedback while dwelling on a month column (0 ≤ progress ≤ 1).
-   * Draws/updates a translucent highlight band behind the column.
-   */
   function gazeDwelling(colId, progress) {
-    if (!_g) return;
+    if (!_g) {
+      return;
+    }
     const band = _g.select('.linechart-dwell-band');
 
     if (!colId) {
-      if (!band.empty()) band.attr('opacity', 0);
+      if (!band.empty()) {
+        band.attr('opacity', 0);
+      }
       return;
     }
 
     const month = colId.replace('col-', '');
-    const idx   = MONTHS.indexOf(month);
-    if (idx < 0) return;
+    const idx = MONTHS.indexOf(month);
+    if (idx < 0) {
+      return;
+    }
 
-    const step   = _xScale.step();
+    const step = _xScale.step();
     const xLocal = _xScale(month) - step / 2;
 
     if (band.empty()) {
@@ -150,41 +174,43 @@ const LineChart = (function () {
       .attr('opacity', 1);
   }
 
-  /**
-   * Show the focus indicator and tooltip on a given month column at gaze pos (x, y).
-   */
   function gazeHover(colId, x, y) {
-    if (!_focusGroup) return;
+    if (!_focusGroup) {
+      return;
+    }
     const month = colId.replace('col-', '');
-    const idx   = MONTHS.indexOf(month);
-    if (idx < 0) return;
+    const idx = MONTHS.indexOf(month);
+    if (idx < 0) {
+      return;
+    }
     _showFocus(month, idx, x, y);
   }
 
-  /** Hide tooltip, focus line, and dwell band. */
   function gazeLeave() {
     gazeDwelling(null, 0);
     _hideFocus();
-    if (_tooltip) _tooltip.style('opacity', 0);
+    if (_tooltip) {
+      _tooltip.style('opacity', 0);
+    }
   }
-
-  // ─── Rendering ───────────────────────────────────────────────────────────────
 
   function _render() {
     const container = document.getElementById(_containerId);
-    if (!container) return;
+    if (!container) {
+      return;
+    }
 
     d3.select('#' + _containerId).selectAll('svg').remove();
 
-    const totalWidth  = container.clientWidth  || 800;
+    const totalWidth = container.clientWidth || 800;
     const totalHeight = container.clientHeight || 480;
     _margin = { top: 55, right: 40, bottom: 72, left: 65 };
-    _chartW = totalWidth  - _margin.left - _margin.right;
-    _chartH = totalHeight - _margin.top  - _margin.bottom;
+    _chartW = totalWidth - _margin.left - _margin.right;
+    _chartH = totalHeight - _margin.top - _margin.bottom;
 
     _svg = d3.select('#' + _containerId)
       .append('svg')
-      .attr('width',  totalWidth)
+      .attr('width', totalWidth)
       .attr('height', totalHeight);
 
     _g = _svg.append('g')
@@ -200,12 +226,10 @@ const LineChart = (function () {
       .domain([Math.min.apply(null, allValues) - 3, Math.max.apply(null, allValues) + 3])
       .range([_chartH, 0]);
 
-    // Horizontal grid
     _g.append('g')
       .attr('class', 'linechart-grid')
       .call(d3.axisLeft(_yScale).tickSize(-_chartW).tickFormat('').ticks(6));
 
-    // X axis
     _g.append('g')
       .attr('class', 'linechart-x-axis')
       .attr('transform', 'translate(0,' + _chartH + ')')
@@ -214,7 +238,6 @@ const LineChart = (function () {
         .style('font-size', '12px')
         .style('fill', '#444');
 
-    // Y axis
     _g.append('g')
       .attr('class', 'linechart-y-axis')
       .call(d3.axisLeft(_yScale).ticks(6).tickFormat(function (d) { return d + '°C'; }))
@@ -222,7 +245,6 @@ const LineChart = (function () {
         .style('font-size', '12px')
         .style('fill', '#444');
 
-    // Axis labels
     _g.append('text')
       .attr('class', 'linechart-axis-label')
       .attr('transform', 'rotate(-90)')
@@ -238,7 +260,6 @@ const LineChart = (function () {
       .attr('text-anchor', 'middle')
       .text('Mois');
 
-    // Title
     _svg.append('text')
       .attr('class', 'linechart-title')
       .attr('x', totalWidth / 2)
@@ -248,17 +269,16 @@ const LineChart = (function () {
 
     var lineGen = d3.line()
       .x(function (d, i) { return _xScale(MONTHS[i]); })
-      .y(function (d)    { return _yScale(d); })
+      .y(function (d) { return _yScale(d); })
       .curve(d3.curveMonotoneX);
 
     var areaGen = d3.area()
       .x(function (d, i) { return _xScale(MONTHS[i]); })
       .y0(_chartH)
-      .y1(function (d)   { return _yScale(d); })
+      .y1(function (d) { return _yScale(d); })
       .curve(d3.curveMonotoneX);
 
     SERIES.forEach(function (series) {
-      // Area fill
       _g.append('path')
         .datum(series.values)
         .attr('class', 'linechart-area linechart-area-' + series.id)
@@ -266,7 +286,6 @@ const LineChart = (function () {
         .attr('opacity', 0.08)
         .attr('d', areaGen);
 
-      // Line
       _g.append('path')
         .datum(series.values)
         .attr('class', 'linechart-line linechart-line-' + series.id)
@@ -275,14 +294,13 @@ const LineChart = (function () {
         .attr('stroke-width', 2.5)
         .attr('d', lineGen);
 
-      // Data point circles
       _g.selectAll('.linechart-dot-' + series.id)
         .data(series.values)
         .enter()
         .append('circle')
         .attr('class', 'linechart-dot linechart-dot-' + series.id)
         .attr('cx', function (d, i) { return _xScale(MONTHS[i]); })
-        .attr('cy', function (d)    { return _yScale(d); })
+        .attr('cy', function (d) { return _yScale(d); })
         .attr('r', 4)
         .attr('fill', series.color)
         .attr('stroke', '#fff')
@@ -290,7 +308,6 @@ const LineChart = (function () {
         .style('pointer-events', 'none');
     });
 
-    // Focus group (vertical guideline + highlighted dots)
     _focusGroup = _g.append('g')
       .attr('class', 'linechart-focus')
       .style('display', 'none');
@@ -312,15 +329,14 @@ const LineChart = (function () {
         .attr('stroke-width', 2);
     });
 
-    // Invisible overlay for mouse hover
     _g.append('rect')
       .attr('class', 'linechart-overlay')
-      .attr('width',  _chartW)
+      .attr('width', _chartW)
       .attr('height', _chartH)
       .attr('fill', 'none')
-      .style('pointer-events', _gazeModeActive ? 'none' : 'all')
+      .style('pointer-events', pointerEventsFor(_gazeModeActive))
       .on('mousemove', function (event) {
-        var pos   = d3.pointer(event, _g.node());
+        var pos = d3.pointer(event, _g.node());
         var month = _closestMonth(pos[0]);
         if (month !== null) {
           var idx = MONTHS.indexOf(month);
@@ -329,10 +345,17 @@ const LineChart = (function () {
       })
       .on('mouseleave', function () {
         _hideFocus();
-        if (_tooltip) _tooltip.style('opacity', 0);
+        if (_tooltip) {
+          _tooltip.style('opacity', 0);
+        }
       });
 
-    // Legend
+    renderLegend(totalWidth, totalHeight);
+
+    _aoiCache = null;
+  }
+
+  function renderLegend(totalWidth, totalHeight) {
     const legendSpacing = 140;
     const legendW = SERIES.length * legendSpacing;
     const legendG = _svg.append('g')
@@ -354,22 +377,42 @@ const LineChart = (function () {
         .style('fill', '#555')
         .text(series.label);
     });
-
-    _aoiCache = null;
   }
 
   function _closestMonth(mx) {
-    var closest  = null;
-    var minDist  = Infinity;
+    var closest = null;
+    var minDist = Infinity;
     MONTHS.forEach(function (month) {
       var d = Math.abs(_xScale(month) - mx);
-      if (d < minDist) { minDist = d; closest = month; }
+      if (d < minDist) {
+        minDist = d;
+        closest = month;
+      }
     });
     return closest;
   }
 
+  function fillTooltipContent(node, month, idx) {
+    while (node.firstChild) {
+      node.removeChild(node.firstChild);
+    }
+    var title = document.createElement('strong');
+    title.textContent = month + ' 2024';
+    node.appendChild(title);
+    SERIES.forEach(function (s) {
+      node.appendChild(document.createElement('br'));
+      node.appendChild(document.createTextNode(s.label + ' : '));
+      var val = document.createElement('strong');
+      val.style.color = s.color;
+      val.textContent = s.values[idx].toFixed(1) + '°C';
+      node.appendChild(val);
+    });
+  }
+
   function _showFocus(month, idx, clientX, clientY) {
-    if (!_focusGroup) return;
+    if (!_focusGroup) {
+      return;
+    }
     var xPos = _xScale(month);
     _focusGroup.style('display', null);
     _focusGroup.select('.linechart-focus-line').attr('x1', xPos).attr('x2', xPos);
@@ -380,30 +423,32 @@ const LineChart = (function () {
         .attr('cy', _yScale(series.values[idx]));
     });
 
-    var html = '<strong>' + month + ' 2024</strong><br/>' +
-      SERIES.map(function (s) {
-        return s.label + '&nbsp;: <strong style="color:' + s.color + '">' + s.values[idx].toFixed(1) + '°C</strong>';
-      }).join('<br/>');
-
     if (_tooltip) {
+      fillTooltipContent(_tooltip.node(), month, idx);
       _tooltip
         .style('opacity', 0.95)
-        .html(html)
         .style('left', (clientX + 16) + 'px')
-        .style('top',  (clientY - 65) + 'px');
+        .style('top', (clientY - 65) + 'px');
     }
   }
 
   function _hideFocus() {
-    if (_focusGroup) _focusGroup.style('display', 'none');
+    if (_focusGroup) {
+      _focusGroup.style('display', 'none');
+    }
   }
 
   function _debounce(fn, wait) {
     var timer;
-    return function () { clearTimeout(timer); timer = setTimeout(fn, wait); };
+    return function () {
+      clearTimeout(timer);
+      timer = setTimeout(fn, wait);
+    };
   }
 
   return { init, getAOIs, setGazeMode, gazeDwelling, gazeHover, gazeLeave, data: SERIES };
 })();
 
-if (typeof window !== 'undefined') window.LineChart = LineChart;
+if (typeof window !== 'undefined') {
+  window.LineChart = LineChart;
+}

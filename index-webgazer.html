@@ -28,6 +28,11 @@
   <link rel="stylesheet" href="src/barchart/barchart.css" />
   <link rel="stylesheet" href="src/linechart/linechart.css" />
   <link rel="stylesheet" href="src/scatterchart/scatterchart.css" />
+  <link rel="stylesheet" href="src/participant-form/participant-form.css" />
+  <link rel="stylesheet" href="src/gaze-capture/gaze-capture.css" />
+  <link rel="stylesheet" href="src/test-scenario/test-scenario.css" />
+  <link rel="stylesheet" href="src/gaze-viz/gaze-viz.css" />
+  <link rel="stylesheet" href="src/results-view/results-view.css" />
 
   <style>
     :root {
@@ -95,6 +100,10 @@
     #face-widget .fw-row { display: flex; justify-content: space-between; margin: 3px 0; }
     #face-widget .fw-dot {
       width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 5px;
+      background: #888;
+    }
+    #face-widget .fw-title {
+      font-weight: bold; color: var(--accent); margin-bottom: 5px;
     }
 
     /* WebGazer force son conteneur vidéo — on le place en bas-gauche pour ne pas
@@ -111,6 +120,42 @@
     #webgazerVideoFeed { width: 160px !important; height: 120px !important; }
     #webgazerFaceOverlay, #webgazerFaceFeedbackBox {
       width: 160px !important; height: 120px !important;
+    }
+
+    /* ── Dialogue de positionnement ─────────────────────────────────────────── */
+    .wg-modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.75); z-index: 9999;
+      display: flex; align-items: center; justify-content: center; font-family: inherit;
+    }
+    .wg-pos-card {
+      background: #16213e; border-radius: 14px; padding: 30px 36px; color: #eee;
+      text-align: center; max-width: 420px; box-shadow: 0 20px 50px rgba(0,0,0,.55);
+    }
+    .wg-pos-title { margin: 0 0 12px; color: #4ecdc4; font-size: 1.1rem; }
+    .wg-pos-hint  { color: #9aa6c0; margin: 0 0 18px; line-height: 1.65; font-size: .92rem; }
+    .wg-pos-btn {
+      background: #4ecdc4; color: #0f0f1a; border: none;
+      border-radius: 8px; padding: 12px 26px; font-weight: 700;
+      cursor: pointer; font-size: .95rem; font-family: inherit;
+    }
+    /* ── Vérification libre avant test ──────────────────────────────────────── */
+    .wg-freelook-box {
+      position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+      z-index: 10006; background: rgba(15,15,26,.92);
+      border: 1px solid rgba(78,205,196,.5); border-radius: 12px;
+      padding: 14px 22px; color: #eee; text-align: center;
+      font-size: .9rem; line-height: 1.7; font-family: inherit;
+    }
+    .wg-freelook-title  { color: #4ecdc4; font-weight: bold; margin-bottom: 5px; }
+    .wg-freelook-accent { color: #4ecdc4; }
+    .wg-freelook-ok {
+      margin-top: 10px; background: #4ecdc4; color: #0f0f1a; border: none;
+      border-radius: 8px; padding: 9px 18px; font-weight: 700; cursor: pointer; font-family: inherit;
+    }
+    .wg-freelook-recal {
+      margin-top: 10px; background: transparent; color: #e0a96a;
+      border: 1px solid rgba(224,169,106,.5); border-radius: 8px;
+      padding: 9px 18px; cursor: pointer; font-family: inherit;
     }
   </style>
 </head>
@@ -142,16 +187,53 @@
 <div id="gaze-cursor"></div>
 
 <div id="face-widget">
-  <div style="font-weight:bold;color:var(--accent);margin-bottom:5px;">Retour environnement</div>
+  <div class="fw-title">Retour environnement</div>
   <div class="fw-row">
-    <span><span class="fw-dot" id="fw-cam-dot" style="background:#888;"></span>Webcam</span>
+    <span><span class="fw-dot" id="fw-cam-dot"></span>Webcam</span>
     <span id="fw-cam">—</span>
   </div>
   <div class="fw-row">
-    <span><span class="fw-dot" id="fw-lux-dot" style="background:#888;"></span>Luminosité</span>
+    <span><span class="fw-dot" id="fw-lux-dot"></span>Luminosité</span>
     <span id="fw-lux">—</span>
   </div>
 </div>
+
+<!-- Gabarit du formulaire participant (hydraté dynamiquement par participant-form.js) -->
+<template id="pf-modal">
+  <div id="pf-overlay">
+    <div class="pf-card">
+      <h3 class="pf-title">
+        <span class="pf-title-text">Informations participant</span>
+        <span class="pf-engine-badge"></span>
+      </h3>
+      <p class="pf-hint">Notez votre identifiant avant de continuer — il sera utilisé pour retrouver vos données.</p>
+      <div class="pf-id-box">
+        <div class="pf-id-label">Votre identifiant</div>
+        <div id="pf-id-display"></div>
+      </div>
+      <div class="pf-field">
+        <label class="pf-label" for="pf-glasses">Correction visuelle</label>
+        <select id="pf-glasses" class="pf-select">
+          <option value="non">Aucune</option>
+          <option value="lunettes">Lunettes</option>
+          <option value="lentilles">Lentilles</option>
+        </select>
+      </div>
+      <div class="pf-field pf-field--last">
+        <label class="pf-label" for="pf-lighting">
+          Luminosité ambiante
+          <span class="pf-lux-note"></span>
+        </label>
+        <select id="pf-lighting" class="pf-select">
+          <option value="faible">Faible — store fermé / lampe de bureau</option>
+          <option value="normale" selected>Normale — bureau éclairé</option>
+          <option value="forte">Forte — lumière naturelle directe</option>
+        </select>
+      </div>
+      <button id="pf-go" class="pf-submit">Commencer →</button>
+    </div>
+  </div>
+</template>
 
 <script src="src/calibration/calibration.js?v=wg"></script>
 <script src="src/participant-form/participant-form.js?v=1"></script>
@@ -253,24 +335,43 @@
   // ── Positionnement ───────────────────────────────────────────────────────────
   function _showPositioning() {
     var overlay = document.createElement('div');
-    overlay.style.cssText =
-      'position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:9999;'
-      + 'display:flex;align-items:center;justify-content:center;font-family:inherit;';
-    overlay.innerHTML =
-      '<div style="background:#16213e;border-radius:14px;padding:30px 36px;color:#eee;'
-      + 'text-align:center;max-width:420px;box-shadow:0 20px 50px rgba(0,0,0,.55);">'
-      + '<h3 style="margin:0 0 12px;color:#4ecdc4;">Positionnement</h3>'
-      + '<p style="color:#9aa6c0;margin:0 0 18px;line-height:1.65;font-size:.92rem;">'
-      + 'Placez-vous à <strong>~60 cm</strong> de l\'écran, visage bien éclairé '
-      + 'et centré face à la caméra.<br><br>'
-      + 'Le retour vidéo WebGazer (en bas à gauche) confirme la détection du visage. '
-      + 'L\'ovale facial doit être vert avant de continuer.</p>'
-      + '<button id="pos-go" style="background:#4ecdc4;color:#0f0f1a;border:none;'
-      + 'border-radius:8px;padding:12px 26px;font-weight:700;cursor:pointer;font-size:.95rem;">'
-      + 'Je suis prêt — Calibrer →</button>'
-      + '</div>';
+    overlay.classList.add('wg-modal-overlay');
+
+    var card = document.createElement('div');
+    card.classList.add('wg-pos-card');
+
+    var h3 = document.createElement('h3');
+    h3.className = 'wg-pos-title';
+    h3.textContent = 'Positionnement';
+    card.appendChild(h3);
+
+    var p = document.createElement('p');
+    p.className = 'wg-pos-hint';
+    p.appendChild(document.createTextNode('Placez-vous à '));
+    var strong1 = document.createElement('strong');
+    strong1.textContent = '~60 cm';
+    p.appendChild(strong1);
+    p.appendChild(document.createTextNode(
+      ' de l\'écran, visage bien éclairé et centré face à la caméra.'
+    ));
+    p.appendChild(document.createElement('br'));
+    p.appendChild(document.createElement('br'));
+    p.appendChild(document.createTextNode(
+      'Le retour vidéo WebGazer (en bas à gauche) confirme la détection du visage. '
+      + 'L\'ovale facial doit être vert avant de continuer.'
+    ));
+    card.appendChild(p);
+
+    var goBtn = document.createElement('button');
+    goBtn.id = 'pos-go';
+    goBtn.className = 'wg-pos-btn';
+    goBtn.textContent = 'Je suis prêt — Calibrer →';
+    card.appendChild(goBtn);
+
+    overlay.appendChild(card);
     document.body.appendChild(overlay);
-    document.getElementById('pos-go').addEventListener('click', function () {
+
+    goBtn.addEventListener('click', function () {
       overlay.remove();
       _runCalibration();
     });
@@ -305,21 +406,37 @@
 
     var box = document.createElement('div');
     box.id = 'wg-freelook';
-    box.style.cssText =
-      'position:fixed;bottom:24px;left:50%;transform:translateX(-50%);z-index:10006;'
-      + 'background:rgba(15,15,26,.92);border:1px solid rgba(78,205,196,.5);border-radius:12px;'
-      + 'padding:14px 22px;color:#eee;text-align:center;font-size:.9rem;line-height:1.7;'
-      + 'font-family:inherit;';
-    box.innerHTML =
-      '<div style="color:#4ecdc4;font-weight:bold;margin-bottom:5px;">Vérification du regard</div>'
-      + 'Le <span style="color:#4ecdc4;">point vert</span> suit votre regard. '
-      + 'Promenez les yeux à l\'écran : il doit vous suivre.<br>'
-      + '<button id="wg-freelook-ok" style="margin-top:10px;background:#4ecdc4;color:#0f0f1a;'
-      + 'border:none;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer;">'
-      + 'C\'est bon — Lancer le test →</button> '
-      + '<button id="wg-freelook-recal" style="margin-top:10px;background:transparent;color:#e0a96a;'
-      + 'border:1px solid rgba(224,169,106,.5);border-radius:8px;padding:9px 18px;cursor:pointer;">'
-      + 'Recalibrer</button>';
+    box.className = 'wg-freelook-box';
+
+    var titleEl = document.createElement('div');
+    titleEl.className = 'wg-freelook-title';
+    titleEl.textContent = 'Vérification du regard';
+    box.appendChild(titleEl);
+
+    box.appendChild(document.createTextNode('Le '));
+    var accentSpan = document.createElement('span');
+    accentSpan.className = 'wg-freelook-accent';
+    accentSpan.textContent = 'point vert';
+    box.appendChild(accentSpan);
+    box.appendChild(document.createTextNode(
+      ' suit votre regard. Promenez les yeux à l\'écran : il doit vous suivre.'
+    ));
+    box.appendChild(document.createElement('br'));
+
+    var okBtn = document.createElement('button');
+    okBtn.id = 'wg-freelook-ok';
+    okBtn.className = 'wg-freelook-ok';
+    okBtn.textContent = 'C\'est bon — Lancer le test →';
+    box.appendChild(okBtn);
+
+    box.appendChild(document.createTextNode(' '));
+
+    var recalBtn = document.createElement('button');
+    recalBtn.id = 'wg-freelook-recal';
+    recalBtn.className = 'wg-freelook-recal';
+    recalBtn.textContent = 'Recalibrer';
+    box.appendChild(recalBtn);
+
     document.body.appendChild(box);
 
     document.getElementById('wg-freelook-ok').addEventListener('click', function () {

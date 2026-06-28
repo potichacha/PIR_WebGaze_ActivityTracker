@@ -1,15 +1,29 @@
 /**
- * gaze-logger.js — Module de journalisation de session (US-3.1)
+ * gaze-logger.js
+ *
+ * Journalisation d'une session de suivi du regard. Le module accumule les points
+ * de regard bruts, les événements oculomoteurs (fixations, saccades), les hits de
+ * zones d'intérêt (AOI), les interactions utilisateur et les états de
+ * visualisation, puis les exporte sous plusieurs formats.
+ *
+ * Chaque point et chaque événement est horodaté avec une horloge monotone
+ * (performance.now()) afin que les durées et les vélocités restent fiables même en
+ * cas d'ajustement de l'heure système. Les points sont enrichis du contexte
+ * disponible : confiance, module source, descripteur DOM observé, état de la
+ * visualisation, luminosité ambiante et contexte du test guidé.
+ *
+ * Exports disponibles : objet JSON, JSON-LD (graphe de connaissances) et CSV à
+ * plat, chacun avec sa variante de téléchargement.
  *
  * API publique :
- *   GazeLogger.init(participantId)           → void
- *   GazeLogger.logRawPoint(x, y, timestamp) → void
- *   GazeLogger.logEvent(event)              → void
- *   GazeLogger.logAOIHit(aoiId, aoiLabel, eventIndex, timestamp) → void
- *   GazeLogger.export()                     → object (JSON)
- *   GazeLogger.download()                   → void
- *   GazeLogger.clear()                      → void
- *   GazeLogger.getStats()                   → object
+ *   GazeLogger.init(participantId, calibrationScore?, info?)
+ *   GazeLogger.logRawPoint(x, y, timestamp, meta?)
+ *   GazeLogger.logEvent(event) / logInteraction(type, details) / logVizState(state)
+ *   GazeLogger.logAOIHit(aoiId, aoiLabel, eventIndex, timestamp?, extra?)
+ *   GazeLogger.export() / exportJsonLd() / exportCsv()
+ *   GazeLogger.download() / downloadJsonLd() / downloadCsv()
+ *   GazeLogger.setLux/getLux, setModule/getModule, setTestContext/clearTestContext
+ *   GazeLogger.describeDom(el) / confidenceColor(conf) / getStats() / clear()
  */
 
 (function (global) {
@@ -18,20 +32,30 @@
   function _uuid() {
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
       var r = Math.random() * 16 | 0;
-      return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+      if (c === 'x') {
+        return r.toString(16);
+      }
+      return (r & 0x3 | 0x8).toString(16);
     });
   }
 
   function _browserName() {
     var ua = navigator.userAgent;
-    if (ua.indexOf('Edg') !== -1)     return 'Edge';
-    if (ua.indexOf('Chrome') !== -1)  return 'Chrome';
-    if (ua.indexOf('Firefox') !== -1) return 'Firefox';
-    if (ua.indexOf('Safari') !== -1)  return 'Safari';
+    if (ua.indexOf('Edg') !== -1) {
+      return 'Edge';
+    }
+    if (ua.indexOf('Chrome') !== -1) {
+      return 'Chrome';
+    }
+    if (ua.indexOf('Firefox') !== -1) {
+      return 'Firefox';
+    }
+    if (ua.indexOf('Safari') !== -1) {
+      return 'Safari';
+    }
     return 'Unknown';
   }
 
-  // Version du module de calibration (si chargé).
   function _calibrationVersion() {
     try {
       if (typeof global.Calibration !== 'undefined' && global.Calibration.CONFIG) {
@@ -41,10 +65,11 @@
     return null;
   }
 
-  // Instantané des paramètres de filtrage/correction qui influencent les données.
   function _configSnapshot() {
     try {
-      if (typeof global.Calibration === 'undefined' || !global.Calibration.CONFIG) return null;
+      if (typeof global.Calibration === 'undefined' || !global.Calibration.CONFIG) {
+        return null;
+      }
       var c = global.Calibration.CONFIG;
       return {
         clicks_per_point:          c.CLICKS_PER_POINT,
@@ -60,12 +85,11 @@
         head_compensation_enabled: c.HEAD_COMPENSATION_ENABLED,
         head_comp_gain:            c.HEAD_COMP_GAIN,
       };
-    } catch (_) { return null; }
+    } catch (_) {
+      return null;
+    }
   }
 
-  // Horloge monotone : performance.now() ne recule jamais (contrairement à
-  // Date.now() sujet aux ajustements NTP/changements d'heure), ce qui est
-  // indispensable pour des durées de fixation et des vélocités fiables.
   function _now() {
     if (typeof performance !== 'undefined' && typeof performance.now === 'function') {
       return performance.now();
@@ -73,174 +97,286 @@
     return Date.now();
   }
 
-  // ─── État interne ────────────────────────────────────────────────────────────
+  function userAgentOrNull() {
+    if (typeof navigator !== 'undefined') {
+      return navigator.userAgent;
+    }
+    return null;
+  }
+
+  function devicePixelRatio() {
+    return (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+  }
+
+  function nullableValue(value) {
+    if (value != null) {
+      return value;
+    }
+    return null;
+  }
+
+  function nullableNumber(value) {
+    if (typeof value === 'number') {
+      return value;
+    }
+    return null;
+  }
+
+  function emptyTestContext() {
+    return { test_case_id: null, target_aoi_id: null, target_x: null, target_y: null };
+  }
+
   var _session       = null;
   var _rawGaze       = [];
   var _events        = [];
   var _aoiHits       = [];
-  var _interactions  = []; // journal d'interactions (clics, survols, navigation…)
-  var _vizStates     = []; // historique des états de visualisation (zoom, vue, filtres…)
-  var _clockOrigin   = 0;  // performance.now() au démarrage de la session
-  var _defaultModuleName = null; // module de capture courant ('webgazer'|'mediapipe')
-  var _currentLux    = null; // dernière luminosité ambiante mesurée (lux)
-  var _testContext   = { test_case_id: null, target_aoi_id: null, target_x: null, target_y: null }; // contexte du test guidé
+  var _interactions  = [];
+  var _vizStates     = [];
+  var _clockOrigin   = 0;
+  var _defaultModuleName = null;
+  var _currentLux    = null;
+  var _testContext   = emptyTestContext();
 
-  // Module émetteur par défaut (gaze engine actif), utilisé si non précisé.
-  function _defaultModule() { return _defaultModuleName || 'unknown'; }
+  function _defaultModule() {
+    return _defaultModuleName || 'unknown';
+  }
 
-  // ─── API publique ────────────────────────────────────────────────────────────
+  function relativeNow() {
+    return +(_now() - _clockOrigin).toFixed(1);
+  }
+
+  function currentLuxFor(meta) {
+    if (meta.lux != null) {
+      return meta.lux;
+    }
+    return _currentLux;
+  }
+
+  function applyTestContext(entry) {
+    if (_testContext.test_case_id != null) {
+      entry.test_case_id = _testContext.test_case_id;
+    }
+    if (_testContext.target_aoi_id != null) {
+      entry.target_aoi_id = _testContext.target_aoi_id;
+    }
+    if (_testContext.target_x != null) {
+      entry.target_x = Math.round(_testContext.target_x);
+    }
+    if (_testContext.target_y != null) {
+      entry.target_y = Math.round(_testContext.target_y);
+    }
+  }
+
+  function fallbackSession() {
+    return {
+      id: _uuid(),
+      participant_id: 'anonymous',
+      start_time: new Date().toISOString(),
+      end_time: new Date().toISOString(),
+      screen_resolution: { width: window.innerWidth, height: window.innerHeight },
+      device_pixel_ratio: devicePixelRatio(),
+      user_agent: userAgentOrNull(),
+      browser: _browserName(),
+      calibration_score: null,
+      calibration_version: _calibrationVersion(),
+      config_snapshot: _configSnapshot(),
+      format_version: GazeLogger.FORMAT_VERSION,
+    };
+  }
+
+  function eventNodeType(type) {
+    if (type === 'fixation') {
+      return 'wga:Fixation';
+    }
+    if (type === 'saccade') {
+      return 'wga:Saccade';
+    }
+    return 'wga:GazeEvent';
+  }
+
+  function screenDimension(session, key) {
+    if (session.screen_resolution) {
+      return session.screen_resolution[key];
+    }
+    return null;
+  }
+
+  function csvEscape(v) {
+    if (v == null) {
+      return '';
+    }
+    var s = String(v);
+    if (/[",\n]/.test(s)) {
+      return '"' + s.replace(/"/g, '""') + '"';
+    }
+    return s;
+  }
+
+  function sanitizeParticipantId(session) {
+    return (session.participant_id || 'session').replace(/[^a-zA-Z0-9_-]/g, '_');
+  }
+
+  function todayStamp() {
+    return new Date().toISOString().slice(0, 10);
+  }
+
+  function triggerDownload(content, mime, name) {
+    var blob = new Blob([content], { type: mime });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    a.click();
+    setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+  }
+
+  function countEvents(type) {
+    return _events.filter(function (e) {
+      return e.type === type;
+    }).length;
+  }
+
   var GazeLogger = {
 
-    /**
-     * Initialise une nouvelle session de log.
-     * @param {string} participantId
-     * @param {object} [calibrationScore] — { mean_error_px, std_error_px }
-     * @param {object} [info] — { first_name, last_name, glasses, engine, lighting, age, ... }
-     */
     init: function (participantId, calibrationScore, info) {
       _rawGaze       = [];
       _events        = [];
       _aoiHits       = [];
       _interactions  = [];
       _vizStates     = [];
-      _testContext   = { test_case_id: null, target_aoi_id: null, target_x: null, target_y: null };
+      _testContext   = emptyTestContext();
       _clockOrigin   = _now();
       info = info || {};
-      _session  = {
+      _session = {
         id:             _uuid(),
         format_version: GazeLogger.FORMAT_VERSION,
         participant_id: participantId || 'anonymous',
         first_name:     info.first_name || null,
         last_name:      info.last_name || null,
-        glasses:        info.glasses != null ? info.glasses : null,
+        glasses:        nullableValue(info.glasses),
         age:            info.age || null,
         lighting:       info.lighting || null,
         engine:         info.engine || _defaultModuleName || null,
         start_time:     new Date().toISOString(),
         end_time:       null,
-        // Origine de l'horloge monotone : tous les timestamps relatifs (t_rel_ms)
-        // sont exprimés par rapport à cet instant.
         clock_origin_ms: _clockOrigin,
         screen_resolution: {
           width:  window.innerWidth,
           height: window.innerHeight,
         },
-        device_pixel_ratio: (typeof window !== 'undefined' && window.devicePixelRatio) || 1,
-        user_agent:        typeof navigator !== 'undefined' ? navigator.userAgent : null,
-        browser:           _browserName(),
-        calibration_score: calibrationScore || null,
-        // Reproductibilité : version du module et instantané de la config de
-        // filtrage/correction utilisée pendant la session. Sans cela, impossible
-        // de rejouer ou comparer deux sessions a posteriori.
+        device_pixel_ratio: devicePixelRatio(),
+        user_agent:         userAgentOrNull(),
+        browser:            _browserName(),
+        calibration_score:  calibrationScore || null,
         calibration_version: _calibrationVersion(),
         config_snapshot:     _configSnapshot(),
       };
     },
 
-    /**
-     * Enregistre un point de regard brut, enrichi de toutes les informations
-     * contextuelles disponibles (demandées par l'encadrante PIR) :
-     *   - confiance de la prédiction,
-     *   - module source (webgazer / mediapipe),
-     *   - objet DOM observé (descripteur détaillé),
-     *   - état de la visualisation au moment du regard.
-     * @param {number} x
-     * @param {number} y
-     * @param {number} timestamp — ms epoch
-     * @param {object} [meta] — { confidence, source_module, dom, viz_state, raw_x, raw_y }
-     */
     logRawPoint: function (x, y, timestamp, meta) {
-      if (!_session) return;
+      if (!_session) {
+        return;
+      }
       meta = meta || {};
       var entry = {
         x: Math.round(x),
         y: Math.round(y),
-        timestamp: timestamp || Date.now(),     // epoch ms (rétro-compatible)
-        t_rel_ms:  +(_now() - _clockOrigin).toFixed(1), // horloge monotone relative
+        timestamp: timestamp || Date.now(),
+        t_rel_ms:  relativeNow(),
         source_module: meta.source_module || _defaultModule(),
       };
-      if (meta.confidence != null) entry.confidence = +(+meta.confidence).toFixed(4);
-      if (meta.raw_x != null) entry.raw_x = Math.round(meta.raw_x);
-      if (meta.raw_y != null) entry.raw_y = Math.round(meta.raw_y);
-      if (meta.dom) entry.dom = meta.dom;
-      if (meta.viz_state) entry.viz_state = meta.viz_state;
-      // Luminosité ambiante mesurée (lux) au moment du point.
-      var lux = (meta.lux != null) ? meta.lux : _currentLux;
-      if (lux != null) entry.lux = Math.round(lux);
-      // Contexte du test guidé : quel stimulus / quelle AOI ciblée / sa position.
-      if (_testContext.test_case_id != null) entry.test_case_id = _testContext.test_case_id;
-      if (_testContext.target_aoi_id != null) entry.target_aoi_id = _testContext.target_aoi_id;
-      if (_testContext.target_x != null) entry.target_x = Math.round(_testContext.target_x);
-      if (_testContext.target_y != null) entry.target_y = Math.round(_testContext.target_y);
+      if (meta.confidence != null) {
+        entry.confidence = +(+meta.confidence).toFixed(4);
+      }
+      if (meta.raw_x != null) {
+        entry.raw_x = Math.round(meta.raw_x);
+      }
+      if (meta.raw_y != null) {
+        entry.raw_y = Math.round(meta.raw_y);
+      }
+      if (meta.dom) {
+        entry.dom = meta.dom;
+      }
+      if (meta.viz_state) {
+        entry.viz_state = meta.viz_state;
+      }
+      var lux = currentLuxFor(meta);
+      if (lux != null) {
+        entry.lux = Math.round(lux);
+      }
+      applyTestContext(entry);
       _rawGaze.push(entry);
     },
 
-    /** Définit la luminosité ambiante courante (lux), injectée dans chaque point. */
-    setLux: function (lux) { _currentLux = (typeof lux === 'number' && isFinite(lux)) ? lux : null; },
-    getLux: function () { return _currentLux; },
+    setLux: function (lux) {
+      if (typeof lux === 'number' && isFinite(lux)) {
+        _currentLux = lux;
+      } else {
+        _currentLux = null;
+      }
+    },
 
-    /** Définit le contexte du test guidé (stimulus + position écran de la cible). */
+    getLux: function () {
+      return _currentLux;
+    },
+
     setTestContext: function (testCaseId, targetAoiId, targetX, targetY) {
       _testContext = {
-        test_case_id:  testCaseId != null ? testCaseId : null,
-        target_aoi_id: targetAoiId != null ? targetAoiId : null,
-        target_x:      (typeof targetX === 'number') ? targetX : null,
-        target_y:      (typeof targetY === 'number') ? targetY : null,
+        test_case_id:  nullableValue(testCaseId),
+        target_aoi_id: nullableValue(targetAoiId),
+        target_x:      nullableNumber(targetX),
+        target_y:      nullableNumber(targetY),
       };
     },
-    clearTestContext: function () { _testContext = { test_case_id: null, target_aoi_id: null, target_x: null, target_y: null }; },
 
-    /**
-     * Enregistre une interaction utilisateur (donnée multimodale : clic, survol,
-     * changement d'onglet, scroll, démarrage/arrêt…). Complète le regard pour
-     * reconstituer l'activité analytique complète.
-     * @param {string} type   — 'click' | 'hover' | 'tab_change' | 'scroll' | 'control' | …
-     * @param {object} [details] — charge utile libre (target, value, x, y…)
-     */
+    clearTestContext: function () {
+      _testContext = emptyTestContext();
+    },
+
     logInteraction: function (type, details) {
-      if (!_session) return;
+      if (!_session) {
+        return;
+      }
       details = details || {};
       _interactions.push({
         type:      type || 'unknown',
         details:   details,
         source_module: details.source_module || 'ui',
         timestamp: Date.now(),
-        t_rel_ms:  +(_now() - _clockOrigin).toFixed(1),
+        t_rel_ms:  relativeNow(),
       });
     },
 
-    /**
-     * Définit le module de capture courant ('webgazer' | 'mediapipe').
-     * Sert de source_module par défaut pour les points de regard.
-     */
-    setModule: function (name) { _defaultModuleName = name || null; },
-    getModule: function () { return _defaultModuleName; },
+    setModule: function (name) {
+      _defaultModuleName = name || null;
+    },
 
-    /**
-     * Enregistre un instantané de l'état de la visualisation (vue active, dataset,
-     * zoom, sélection, filtres…). À appeler à chaque changement d'état pertinent.
-     * @param {object} state
-     */
+    getModule: function () {
+      return _defaultModuleName;
+    },
+
     logVizState: function (state) {
-      if (!_session || !state) return;
+      if (!_session || !state) {
+        return;
+      }
       _vizStates.push({
         state:     state,
         timestamp: Date.now(),
-        t_rel_ms:  +(_now() - _clockOrigin).toFixed(1),
+        t_rel_ms:  relativeNow(),
       });
     },
 
-    /** Dernier état de visualisation connu (pour annoter les points de regard). */
     getCurrentVizState: function () {
-      return _vizStates.length ? _vizStates[_vizStates.length - 1].state : null;
+      if (!_vizStates.length) {
+        return null;
+      }
+      return _vizStates[_vizStates.length - 1].state;
     },
 
-    /**
-     * Enregistre un événement (fixation ou saccade).
-     * @param {object} event — { type, start_time, end_time, duration, details }
-     */
     logEvent: function (event) {
-      if (!_session || !event) return;
+      if (!_session || !event) {
+        return;
+      }
       _events.push({
         type:       event.type       || 'unknown',
         start_time: event.start_time || 0,
@@ -251,47 +387,34 @@
       });
     },
 
-    /**
-     * Enregistre un hit AOI (fixation dans une zone d'intérêt).
-     * @param {string} aoiId
-     * @param {string} aoiLabel
-     * @param {number} eventIndex — index dans _events
-     * @param {number} [timestamp]
-     */
     logAOIHit: function (aoiId, aoiLabel, eventIndex, timestamp, extra) {
-      if (!_session) return;
+      if (!_session) {
+        return;
+      }
       extra = extra || {};
       var hit = {
         aoi_id:      aoiId    || '',
         aoi_label:   aoiLabel || '',
-        event_index: typeof eventIndex === 'number' ? eventIndex : -1,
+        event_index: nullableNumber(eventIndex) == null ? -1 : eventIndex,
         timestamp:   timestamp || Date.now(),
-        t_rel_ms:    +(_now() - _clockOrigin).toFixed(1),
+        t_rel_ms:    relativeNow(),
         source_module: extra.source_module || 'post_processing',
       };
-      // Descripteur DOM détaillé + état de la visu au moment du hit (PIR).
-      if (extra.dom) hit.dom = extra.dom;
-      if (extra.viz_state) hit.viz_state = extra.viz_state;
+      if (extra.dom) {
+        hit.dom = extra.dom;
+      }
+      if (extra.viz_state) {
+        hit.viz_state = extra.viz_state;
+      }
       _aoiHits.push(hit);
     },
 
-    /**
-     * Exporte la session complète sous forme d'objet JSON.
-     * @returns {object}
-     */
     export: function () {
-      if (_session) _session.end_time = new Date().toISOString();
+      if (_session) {
+        _session.end_time = new Date().toISOString();
+      }
       return {
-        session:       _session || {
-          id: _uuid(), participant_id: 'anonymous',
-          start_time: new Date().toISOString(), end_time: new Date().toISOString(),
-          screen_resolution: { width: window.innerWidth, height: window.innerHeight },
-          device_pixel_ratio: (typeof window !== 'undefined' && window.devicePixelRatio) || 1,
-          user_agent: typeof navigator !== 'undefined' ? navigator.userAgent : null,
-          browser: _browserName(), calibration_score: null,
-          calibration_version: _calibrationVersion(), config_snapshot: _configSnapshot(),
-          format_version: GazeLogger.FORMAT_VERSION,
-        },
+        session:       _session || fallbackSession(),
         raw_gaze_data: _rawGaze.slice(),
         events:        _events.slice(),
         aoi_hits:      _aoiHits.slice(),
@@ -300,13 +423,6 @@
       };
     },
 
-    /**
-     * Exporte la session au format JSON-LD orienté graphe de connaissances.
-     * Chaque entité (session, participant, fixation, saccade, interaction, AOI)
-     * devient un nœud typé, prêt à être intégré dans un knowledge graph (objectif
-     * Activity Tracker du PIR). Vocabulaire minimal sous le préfixe `wga:`.
-     * @returns {object} document JSON-LD (@context + @graph)
-     */
     exportJsonLd: function () {
       var data = this.export();
       var s = data.session;
@@ -320,8 +436,8 @@
         'wga:startTime': s.start_time,
         'wga:endTime': s.end_time,
         'wga:browser': s.browser,
-        'wga:screenWidth': s.screen_resolution ? s.screen_resolution.width : null,
-        'wga:screenHeight': s.screen_resolution ? s.screen_resolution.height : null,
+        'wga:screenWidth': screenDimension(s, 'width'),
+        'wga:screenHeight': screenDimension(s, 'height'),
         'wga:calibrationVersion': s.calibration_version || null,
       });
 
@@ -334,17 +450,22 @@
       data.events.forEach(function (e, i) {
         var node = {
           '@id': base + e.type + ':' + i,
-          '@type': e.type === 'fixation' ? 'wga:Fixation'
-                 : e.type === 'saccade'  ? 'wga:Saccade' : 'wga:GazeEvent',
+          '@type': eventNodeType(e.type),
           'wga:inSession': { '@id': 'urn:wga:session:' + s.id },
           'wga:startTime': e.start_time,
           'wga:endTime': e.end_time,
           'wga:duration': e.duration,
         };
         if (e.details) {
-          if (typeof e.details.x === 'number') node['wga:x'] = e.details.x;
-          if (typeof e.details.y === 'number') node['wga:y'] = e.details.y;
-          if (typeof e.details.amplitude === 'number') node['wga:amplitude'] = e.details.amplitude;
+          if (typeof e.details.x === 'number') {
+            node['wga:x'] = e.details.x;
+          }
+          if (typeof e.details.y === 'number') {
+            node['wga:y'] = e.details.y;
+          }
+          if (typeof e.details.amplitude === 'number') {
+            node['wga:amplitude'] = e.details.amplitude;
+          }
         }
         graph.push(node);
       });
@@ -365,7 +486,9 @@
           node['wga:domRole'] = h.dom.semantic_type || null;
           node['wga:domText'] = h.dom.text || null;
         }
-        if (h.viz_state) node['wga:vizState'] = h.viz_state;
+        if (h.viz_state) {
+          node['wga:vizState'] = h.viz_state;
+        }
         graph.push(node);
       });
 
@@ -391,87 +514,44 @@
       };
     },
 
-    /**
-     * Déclenche le téléchargement du fichier JSON.
-     */
     download: function () {
       var data = this.export();
-      var pid  = (data.session.participant_id || 'session').replace(/[^a-zA-Z0-9_-]/g, '_');
-      var date = new Date().toISOString().slice(0, 10);
-      var name = 'session_' + pid + '_' + date + '.json';
-      var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-      var url  = URL.createObjectURL(blob);
-      var a    = document.createElement('a');
-      a.href     = url;
-      a.download = name;
-      a.click();
-      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      var name = 'session_' + sanitizeParticipantId(data.session) + '_' + todayStamp() + '.json';
+      triggerDownload(JSON.stringify(data, null, 2), 'application/json', name);
     },
 
-    /**
-     * Exporte les points de regard au format CSV (à plat), pratique pour l'analyse
-     * tabulaire (pandas, R, Excel). Colonnes : temps, position, confiance, module,
-     * et l'objet DOM / l'état de visu observés.
-     * @returns {string} contenu CSV
-     */
     exportCsv: function () {
       var data = this.export();
       var cols = ['t_rel_ms', 'timestamp', 'x', 'y', 'raw_x', 'raw_y', 'confidence', 'lux',
                   'source_module', 'test_case_id', 'target_aoi_id',
                   'dom_semantic_type', 'dom_text', 'dom_id',
                   'viz_active_view', 'viz_dataset', 'viz_current_aoi'];
-      function esc(v) {
-        if (v == null) return '';
-        var s = String(v);
-        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
-      }
       var lines = [cols.join(',')];
       (data.raw_gaze_data || []).forEach(function (p) {
-        var dom = p.dom || {}, vs = p.viz_state || {};
+        var dom = p.dom || {};
+        var vs = p.viz_state || {};
         lines.push([
           p.t_rel_ms, p.timestamp, p.x, p.y, p.raw_x, p.raw_y, p.confidence, p.lux,
           p.source_module, p.test_case_id, p.target_aoi_id,
           dom.semantic_type, dom.text, dom.id,
           vs.active_view, vs.dataset, vs.current_aoi,
-        ].map(esc).join(','));
+        ].map(csvEscape).join(','));
       });
       return lines.join('\n');
     },
 
-    /** Déclenche le téléchargement du CSV des points de regard. */
     downloadCsv: function () {
       var csv = this.exportCsv();
-      var sess = this.export().session;
-      var pid  = (sess.participant_id || 'session').replace(/[^a-zA-Z0-9_-]/g, '_');
-      var date = new Date().toISOString().slice(0, 10);
-      var blob = new Blob([csv], { type: 'text/csv' });
-      var url  = URL.createObjectURL(blob);
-      var a    = document.createElement('a');
-      a.href = url; a.download = 'session_' + pid + '_' + date + '.csv'; a.click();
-      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      var name = 'session_' + sanitizeParticipantId(this.export().session) + '_' + todayStamp() + '.csv';
+      triggerDownload(csv, 'text/csv', name);
     },
 
-    /**
-     * Déclenche le téléchargement de l'export JSON-LD (graphe de connaissances).
-     */
     downloadJsonLd: function () {
       var data = this.exportJsonLd();
-      var sess = this.export().session;
-      var pid  = (sess.participant_id || 'session').replace(/[^a-zA-Z0-9_-]/g, '_');
-      var date = new Date().toISOString().slice(0, 10);
-      var name = 'session_' + pid + '_' + date + '.jsonld';
-      var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/ld+json' });
-      var url  = URL.createObjectURL(blob);
-      var a    = document.createElement('a');
-      a.href     = url;
-      a.download = name;
-      a.click();
-      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+      var name = 'session_' + sanitizeParticipantId(this.export().session) + '_' + todayStamp() + '.jsonld';
+      triggerDownload(JSON.stringify(data, null, 2), 'application/ld+json', name);
     },
 
-    /**
-     * Remet le logger à zéro (sans re-init de session).
-     */
     clear: function () {
       _session       = null;
       _rawGaze       = [];
@@ -479,47 +559,59 @@
       _aoiHits       = [];
       _interactions  = [];
       _vizStates     = [];
-      _testContext   = { test_case_id: null, target_aoi_id: null, target_x: null, target_y: null };
+      _testContext   = emptyTestContext();
     },
 
-    /**
-     * Retourne des stats rapides sur la session en cours.
-     */
     getStats: function () {
-      var withConf = _rawGaze.filter(function (p) { return typeof p.confidence === 'number'; });
-      var meanConf = withConf.length
-        ? withConf.reduce(function (s, p) { return s + p.confidence; }, 0) / withConf.length : null;
+      var withConf = _rawGaze.filter(function (p) {
+        return typeof p.confidence === 'number';
+      });
+      var meanConf = null;
+      if (withConf.length) {
+        var sum = withConf.reduce(function (s, p) {
+          return s + p.confidence;
+        }, 0);
+        meanConf = +(sum / withConf.length).toFixed(3);
+      }
       return {
         rawPoints:    _rawGaze.length,
-        fixations:    _events.filter(function (e) { return e.type === 'fixation'; }).length,
-        saccades:     _events.filter(function (e) { return e.type === 'saccade';  }).length,
+        fixations:    countEvents('fixation'),
+        saccades:     countEvents('saccade'),
         aoiHits:      _aoiHits.length,
         interactions: _interactions.length,
         vizStates:    _vizStates.length,
-        meanConfidence: meanConf != null ? +meanConf.toFixed(3) : null,
+        meanConfidence: meanConf,
       };
     },
 
-    /**
-     * Construit un descripteur DOM détaillé d'un élément (objet observé par le
-     * regard) : balise, identifiants, type sémantique, géométrie, texte, data-*.
-     * Demandé par l'encadrante : « le plus d'informations possibles pour identifier
-     * s'il s'agissait d'une barre, de l'axe, etc. »
-     * @param {Element} el
-     * @returns {object|null}
-     */
     describeDom: function (el) {
-      if (!el || el.nodeType !== 1) return null;
-      var rect = (typeof el.getBoundingClientRect === 'function')
-        ? el.getBoundingClientRect() : { left: 0, top: 0, width: 0, height: 0 };
+      if (!el || el.nodeType !== 1) {
+        return null;
+      }
+      var rect = { left: 0, top: 0, width: 0, height: 0 };
+      if (typeof el.getBoundingClientRect === 'function') {
+        rect = el.getBoundingClientRect();
+      }
       var classes = [];
-      try { classes = Array.prototype.slice.call(el.classList || []); } catch (_) {}
+      try {
+        classes = Array.prototype.slice.call(el.classList || []);
+      } catch (_) {}
       var dataAttrs = {};
       try {
-        if (el.dataset) { for (var k in el.dataset) dataAttrs[k] = el.dataset[k]; }
+        if (el.dataset) {
+          for (var k in el.dataset) {
+            dataAttrs[k] = el.dataset[k];
+          }
+        }
       } catch (_) {}
       var text = '';
-      try { text = (el.textContent || '').trim().slice(0, 120); } catch (_) {}
+      try {
+        text = (el.textContent || '').trim().slice(0, 120);
+      } catch (_) {}
+      var data = null;
+      if (Object.keys(dataAttrs).length) {
+        data = dataAttrs;
+      }
       return {
         tag:           (el.tagName || '').toLowerCase(),
         id:            el.id || null,
@@ -529,65 +621,101 @@
                          width: Math.round(rect.width), height: Math.round(rect.height) },
         text:          text || null,
         aria_label:    (el.getAttribute && el.getAttribute('aria-label')) || null,
-        data:          Object.keys(dataAttrs).length ? dataAttrs : null,
+        data:          data,
         css_selector:  _cssSelector(el),
       };
     },
 
-    /**
-     * Couleur représentant un niveau de confiance ∈ [0,1] : rouge (faible) →
-     * orange → vert (élevée). Partagé par les deux moteurs pour colorer le point
-     * de regard en direct. Retourne une chaîne rgb().
-     */
     confidenceColor: function (conf) {
-      var c = (typeof conf === 'number' && isFinite(conf)) ? Math.max(0, Math.min(1, conf)) : 0.5;
-      // 0 → rouge (231,76,60), 0.5 → orange (230,126,34), 1 → vert (39,174,96)
+      var c = 0.5;
+      if (typeof conf === 'number' && isFinite(conf)) {
+        c = Math.max(0, Math.min(1, conf));
+      }
       var r, g, b;
-      if (c < 0.5) { var t = c / 0.5; r = 231 + (230-231)*t; g = 76 + (126-76)*t; b = 60 + (34-60)*t; }
-      else         { var u = (c-0.5)/0.5; r = 230 + (39-230)*u; g = 126 + (174-126)*u; b = 34 + (96-34)*u; }
+      if (c < 0.5) {
+        var t = c / 0.5;
+        r = 231 + (230 - 231) * t;
+        g = 76 + (126 - 76) * t;
+        b = 60 + (34 - 60) * t;
+      } else {
+        var u = (c - 0.5) / 0.5;
+        r = 230 + (39 - 230) * u;
+        g = 126 + (174 - 126) * u;
+        b = 34 + (96 - 34) * u;
+      }
       return 'rgb(' + Math.round(r) + ',' + Math.round(g) + ',' + Math.round(b) + ')';
     },
 
-    isInitialized: function () { return !!_session; },
+    isInitialized: function () {
+      return !!_session;
+    },
   };
 
-  // Devine le type sémantique d'un élément de visualisation (barre, axe, point,
-  // légende, ligne…) à partir de la balise, des classes et des data-*.
   function _semanticType(el, classes, data) {
     var hay = (classes.join(' ') + ' ' + (el.id || '') + ' ' +
                Object.keys(data).join(' ')).toLowerCase();
-    if (data.aoiType) return data.aoiType;
-    if (/\bbar\b|barre/.test(hay)) return 'bar';
-    if (/axis|axe|tick/.test(hay)) return 'axis';
-    if (/legend|légende/.test(hay)) return 'legend';
-    if (/point|dot|circle|scatter/.test(hay)) return 'point';
-    if (/line|courbe|path/.test(hay) || (el.tagName || '').toLowerCase() === 'path') return 'line';
-    if (/label|title|titre/.test(hay)) return 'label';
     var tag = (el.tagName || '').toLowerCase();
-    if (tag === 'rect') return 'bar';
-    if (tag === 'circle') return 'point';
-    if (tag === 'text') return 'label';
+    if (data.aoiType) {
+      return data.aoiType;
+    }
+    if (/\bbar\b|barre/.test(hay)) {
+      return 'bar';
+    }
+    if (/axis|axe|tick/.test(hay)) {
+      return 'axis';
+    }
+    if (/legend|légende/.test(hay)) {
+      return 'legend';
+    }
+    if (/point|dot|circle|scatter/.test(hay)) {
+      return 'point';
+    }
+    if (/line|courbe|path/.test(hay) || tag === 'path') {
+      return 'line';
+    }
+    if (/label|title|titre/.test(hay)) {
+      return 'label';
+    }
+    if (tag === 'rect') {
+      return 'bar';
+    }
+    if (tag === 'circle') {
+      return 'point';
+    }
+    if (tag === 'text') {
+      return 'label';
+    }
     return tag || 'unknown';
   }
 
-  // Sélecteur CSS court et lisible pour re-localiser l'élément.
   function _cssSelector(el) {
     try {
-      if (el.id) return '#' + el.id;
+      if (el.id) {
+        return '#' + el.id;
+      }
       var tag = (el.tagName || '').toLowerCase();
       var cls = '';
-      try { if (el.classList && el.classList.length) cls = '.' + Array.prototype.slice.call(el.classList).join('.'); } catch (_) {}
-      var parent = el.parentElement;
+      try {
+        if (el.classList && el.classList.length) {
+          cls = '.' + Array.prototype.slice.call(el.classList).join('.');
+        }
+      } catch (_) {}
       var idx = '';
+      var parent = el.parentElement;
       if (parent) {
-        var sibs = Array.prototype.filter.call(parent.children, function (c) { return c.tagName === el.tagName; });
-        if (sibs.length > 1) idx = ':nth-of-type(' + (Array.prototype.indexOf.call(sibs, el) + 1) + ')';
+        var sibs = Array.prototype.filter.call(parent.children, function (c) {
+          return c.tagName === el.tagName;
+        });
+        if (sibs.length > 1) {
+          idx = ':nth-of-type(' + (Array.prototype.indexOf.call(sibs, el) + 1) + ')';
+        }
       }
       return tag + cls + idx;
-    } catch (_) { return null; }
+    } catch (_) {
+      return null;
+    }
   }
 
-  // Version du format d'export — à incrémenter à tout changement de schéma.
   GazeLogger.FORMAT_VERSION = '1.3.0';
 
   global.GazeLogger = GazeLogger;

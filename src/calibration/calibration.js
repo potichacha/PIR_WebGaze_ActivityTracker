@@ -197,7 +197,8 @@
       if (j < i) resetWin(i);
 
       while (j + 1 < points.length) {
-        const dur = j >= i ? points[j].timestamp - points[i].timestamp : 0;
+        let dur = 0;
+        if (j >= i) dur = points[j].timestamp - points[i].timestamp;
         if (dur >= durationMin) break;
         pushIdx(j + 1);
       }
@@ -294,8 +295,10 @@
   }
 
   function linkEvents(fixations, saccades) {
-    const fixList = Array.isArray(fixations) ? fixations.slice().sort((a, b) => a.start_time - b.start_time) : [];
-    const sacList = Array.isArray(saccades) ? saccades.slice().sort((a, b) => a.start_time - b.start_time) : [];
+    let fixList = [];
+    if (Array.isArray(fixations)) fixList = fixations.slice().sort((a, b) => a.start_time - b.start_time);
+    let sacList = [];
+    if (Array.isArray(saccades)) sacList = saccades.slice().sort((a, b) => a.start_time - b.start_time);
 
     const timeline = [];
     let i = 0;
@@ -320,9 +323,9 @@
   // ─── Stabilité du regard (pour le curseur personnalisé) ───────────────────
 
   function checkStability(stabilityQueue, point, maxWidth, maxHeight, requiredCount) {
-    maxWidth     = maxWidth     !== undefined ? maxWidth     : 100;
-    maxHeight    = maxHeight    !== undefined ? maxHeight    : 80;
-    requiredCount = requiredCount !== undefined ? requiredCount : 5;
+    if (maxWidth === undefined) maxWidth = 100;
+    if (maxHeight === undefined) maxHeight = 80;
+    if (requiredCount === undefined) requiredCount = 5;
     if (!Array.isArray(stabilityQueue)) return false;
     if (!point || !Number.isFinite(point.x) || !Number.isFinite(point.y)) {
       stabilityQueue.length = 0; return false;
@@ -380,8 +383,12 @@
   function updateSaccadeStatus(isSaccade) {
     const el = typeof document !== 'undefined' && document.getElementById('cal-saccade-status');
     if (el) {
-      const text = isSaccade ? 'oui' : 'non';
-      const color = isSaccade ? '#e74c3c' : '#95a5a6';
+      let text = 'non';
+      let color = '#95a5a6';
+      if (isSaccade) {
+        text = 'oui';
+        color = '#e74c3c';
+      }
       el.style.color = color;
       el.textContent = `Saccades: ${text}`;
     }
@@ -440,7 +447,9 @@
         cursor.style.display = 'block';
         cursor.style.left    = (avgX - cursorSize / 2) + 'px';
         cursor.style.top     = (avgY - cursorSize / 2) + 'px';
-        cursor.style.background = stable ? 'rgba(39,174,96,0.1)' : 'rgba(255,255,255,0.1)';
+        let cursorBackground = 'rgba(255,255,255,0.1)';
+        if (stable) cursorBackground = 'rgba(39,174,96,0.1)';
+        cursor.style.background = cursorBackground;
         updateGazeCursorCoords(avgX, avgY);
       });
     } catch (e) {
@@ -456,8 +465,10 @@
     this.vx = 0; this.vy = 0;
     this.px  = 1000; this.py  = 1000;
     this.pvx = 100;  this.pvy = 100;
-    this.Q  = (Q !== undefined) ? Q : CONFIG.KALMAN_Q;
-    this.R  = (R !== undefined) ? R : CONFIG.KALMAN_R;
+    this.Q = CONFIG.KALMAN_Q;
+    if (Q !== undefined) this.Q = Q;
+    this.R = CONFIG.KALMAN_R;
+    if (R !== undefined) this.R = R;
     this.initialized = false;
   }
 
@@ -577,7 +588,8 @@
     if (typeof webgazer === 'undefined') return null;
     let positions = null;
     try {
-      const tracker = webgazer.getTracker ? webgazer.getTracker() : null;
+      let tracker = null;
+      if (webgazer.getTracker) tracker = webgazer.getTracker();
       if (tracker && typeof tracker.getPositions === 'function') {
         positions = tracker.getPositions();
       }
@@ -586,8 +598,14 @@
     let sx = 0, sy = 0, n = 0;
     for (const p of positions) {
       // Les landmarks peuvent être [x, y] ou {x, y} selon le tracker.
-      const px = Array.isArray(p) ? p[0] : (p && p.x);
-      const py = Array.isArray(p) ? p[1] : (p && p.y);
+      let px, py;
+      if (Array.isArray(p)) {
+        px = p[0];
+        py = p[1];
+      } else {
+        px = p && p.x;
+        py = p && p.y;
+      }
       if (Number.isFinite(px) && Number.isFinite(py)) { sx += px; sy += py; n++; }
     }
     if (!n) return null;
@@ -664,12 +682,15 @@
   function updateDebugPanel(entry) {
     let panel = document.getElementById('cal-debug-panel');
     if (!panel) return;
-    const rows = debugEvents.slice(-8).map(e =>
-      `<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+    const rows = debugEvents.slice(-8).map(e => {
+      let levelColor = '#ddd';
+      if (e.level === 'error') levelColor = '#e74c3c';
+      else if (e.level === 'warn') levelColor = '#f39c12';
+      return `<div style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
         <span style="color:#4ecdc4;">${e.ts.slice(11, 19)}</span>
-        <span style="color:${e.level === 'error' ? '#e74c3c' : e.level === 'warn' ? '#f39c12' : '#ddd'};">${e.message}</span>
-      </div>`
-    ).join('');
+        <span style="color:${levelColor};">${e.message}</span>
+      </div>`;
+    }).join('');
     panel.innerHTML = `
       <div style="font-weight:bold;color:#4ecdc4;margin-bottom:4px;">Calibration debug ${CONFIG.VERSION}</div>
       <div>pred: ${predictionStats.syncValid}/${predictionStats.calls} valid, promises ${predictionStats.promiseResolved}/${predictionStats.promises}, err ${predictionStats.errors}</div>
@@ -720,8 +741,12 @@
   }
 
   function getSafeScreenPoint(point) {
-    const width = typeof window !== 'undefined' ? window.innerWidth : 1920;
-    const height = typeof window !== 'undefined' ? window.innerHeight : 1080;
+    let width = 1920;
+    let height = 1080;
+    if (typeof window !== 'undefined') {
+      width = window.innerWidth;
+      height = window.innerHeight;
+    }
     const minX = Math.min(CONFIG.SAFE_MARGIN_X, Math.floor(width / 2));
     const maxX = Math.max(minX, width - CONFIG.SAFE_MARGIN_X);
     const minY = Math.min(CONFIG.SAFE_MARGIN_TOP, Math.floor(height / 2));
@@ -751,7 +776,8 @@
     if (!arr.length) return 0;
     const s = [...arr].sort((a, b) => a - b);
     const mid = Math.floor(s.length / 2);
-    return s.length % 2 ? s[mid] : (s[mid - 1] + s[mid]) / 2;
+    if (s.length % 2) return s[mid];
+    return (s[mid - 1] + s[mid]) / 2;
   }
 
   // Filtre médian glissant sur tableau de points {x, y}
@@ -774,21 +800,33 @@
   }
 
   function summarizeValidationQuality(perPoint) {
-    const points = Array.isArray(perPoint) ? perPoint : [];
+    let points = [];
+    if (Array.isArray(perPoint)) points = perPoint;
     const roiPercents = points.map(p => p.roiPercent).filter(Number.isFinite);
     const sampleRates = points.map(p => p.samplesPerSec).filter(Number.isFinite);
     const weakPoints = points.filter(p =>
       Number.isFinite(p.roiPercent) && p.roiPercent < CONFIG.MIN_ROI_PERCENT
     );
     const noDataPoints = points.filter(p => p.noData);
+
+    let minRoiPercent = 100;
+    if (roiPercents.length) minRoiPercent = Math.min(...roiPercents);
+
+    let minSamplesPerSec = Infinity;
+    let lowSampleRate = false;
+    if (sampleRates.length) {
+      minSamplesPerSec = Math.min(...sampleRates);
+      lowSampleRate = minSamplesPerSec < CONFIG.MIN_SAMPLES_PER_SEC;
+    }
+
     return {
       meanRoiPercent: mean(roiPercents),
-      minRoiPercent: roiPercents.length ? Math.min(...roiPercents) : 100,
+      minRoiPercent,
       meanSamplesPerSec: mean(sampleRates),
-      minSamplesPerSec: sampleRates.length ? Math.min(...sampleRates) : Infinity,
+      minSamplesPerSec,
       weakPoints,
       noDataPoints,
-      lowSampleRate: sampleRates.length ? Math.min(...sampleRates) < CONFIG.MIN_SAMPLES_PER_SEC : false,
+      lowSampleRate,
     };
   }
 
@@ -982,8 +1020,10 @@
       transform: translateX(-50%);
       color: #eee; text-align: center; pointer-events: none;
     `;
+    let subtextHtml = '';
+    if (subtext) subtextHtml = `<p style="margin:4px 0 0;font-size:.85rem;color:#aaa;">${subtext}</p>`;
     div.innerHTML = `<h2 style="margin:0;font-size:1.2rem;">${text}</h2>
-      ${subtext ? `<p style="margin:4px 0 0;font-size:.85rem;color:#aaa;">${subtext}</p>` : ''}`;
+      ${subtextHtml}`;
     overlay.appendChild(div);
   }
 
@@ -1108,9 +1148,14 @@
             }
             const lum = t / (cw * ch);
             const ok = lum >= DIST_BRIGHT_MIN && lum <= DIST_BRIGHT_MAX;
-            oval.style.borderColor = ok ? '#27ae60' : '#e74c3c';
-            lbl.style.color        = ok ? '#27ae60' : '#e74c3c';
-            lbl.textContent        = ok ? '✓ ~60 cm' : lum < DIST_BRIGHT_MIN ? '↔ Rapprochez-vous' : '↔ Éloignez-vous';
+            let mirrorColor = '#e74c3c';
+            if (ok) mirrorColor = '#27ae60';
+            oval.style.borderColor = mirrorColor;
+            lbl.style.color = mirrorColor;
+            let distanceLabel = '↔ Éloignez-vous';
+            if (ok) distanceLabel = '✓ ~60 cm';
+            else if (lum < DIST_BRIGHT_MIN) distanceLabel = '↔ Rapprochez-vous';
+            lbl.textContent = distanceLabel;
           } catch (_) {}
         }, 800);
       }).catch(() => {});
@@ -1140,10 +1185,20 @@
     const isBottom = pointY > H / 2;
 
     // Choisir le coin le plus éloigné du point
-    wrap.style.left   = isLeft   ? 'auto' : '16px';
-    wrap.style.right  = isLeft   ? '16px' : 'auto';
-    wrap.style.bottom = isBottom ? 'auto' : '16px';
-    wrap.style.top    = isBottom ? '16px' : 'auto';
+    if (isLeft) {
+      wrap.style.left = 'auto';
+      wrap.style.right = '16px';
+    } else {
+      wrap.style.left = '16px';
+      wrap.style.right = 'auto';
+    }
+    if (isBottom) {
+      wrap.style.bottom = 'auto';
+      wrap.style.top = '16px';
+    } else {
+      wrap.style.bottom = '16px';
+      wrap.style.top = 'auto';
+    }
   }
 
   // ─── PHASE -1 : Questionnaire pré-calibration ────────────────────────────
@@ -1246,8 +1301,11 @@
       }
       const getRadio = name => {
         const el = form.querySelector(`input[name="${name}"]:checked`);
-        return el ? el.value : null;
+        if (el) return el.value;
+        return null;
       };
+      let screenResolution = null;
+      if (typeof screen !== 'undefined') screenResolution = screen.width + 'x' + screen.height;
       calibrationSession = {
         participant_id: pid,
         date:           new Date().toISOString().slice(0, 10),
@@ -1256,8 +1314,7 @@
         glasses:        getRadio('q-glasses'),
         browser:        document.getElementById('q-browser').value || null,
         lighting:       getRadio('q-lighting'),
-        screen_resolution: typeof screen !== 'undefined'
-          ? screen.width + 'x' + screen.height : null,
+        screen_resolution: screenResolution,
       };
       removeOverlay();
       onDone();
@@ -1368,20 +1425,26 @@
     const DIST_BRIGHT_MAX = 210;  // trop brillant → trop près
 
     function updateOval(ok) {
-      const color     = ok ? '#27ae60' : '#e74c3c';
-      const shadow    = ok ? '0 0 12px 4px rgba(39,174,96,0.45)' : '0 0 0 0 rgba(231,76,60,0)';
+      let color = '#e74c3c';
+      let shadow = '0 0 0 0 rgba(231,76,60,0)';
+      let labelText = 'Alignez votre visage ici';
+      if (ok) {
+        color = '#27ae60';
+        shadow = '0 0 12px 4px rgba(39,174,96,0.45)';
+        labelText = '✓ Distance correcte';
+      }
       faceOval.style.borderColor = color;
       faceOval.style.boxShadow   = shadow;
       ovalLabel.style.color      = color;
-      ovalLabel.textContent      = ok
-        ? '✓ Distance correcte'
-        : 'Alignez votre visage ici';
+      ovalLabel.textContent      = labelText;
     }
 
     function checkReadiness() {
       const ready = luminanceOk && lightBalanceOk && distanceOk;
-      btnReady.disabled     = !ready;
-      btnReady.style.opacity = ready ? '1' : '0.45';
+      btnReady.disabled = !ready;
+      let opacity = '0.45';
+      if (ready) opacity = '1';
+      btnReady.style.opacity = opacity;
     }
 
     function updateStatus(lum, centerLum, balanceDiff) {
@@ -1905,24 +1968,29 @@
       if (idx >= grid.length) {
         // Erreur BRUTE (avant correction) avec outliers retirés en 1D.
         const rawErrs = removeOutliers1D(errors.map(e => e.err), CONFIG.OUTLIER_SIGMA);
-        const usedErrs = rawErrs.length ? rawErrs : errors.map(e => e.err);
+        let usedErrs = errors.map(e => e.err);
+        if (rawErrs.length) usedErrs = rawErrs;
         const meanErr = mean(usedErrs);
         const stdErr  = stdDev(usedErrs);
 
         // Erreur de GÉNÉRALISATION (leave-one-out) — score honnête après correction.
         const loo = computeLooError(rawPredsByPoint);
 
-        // Calcul biais global et par quadrant + champ de correction
         computeBiasCorrection(rawPredsByPoint, grid);
+
+        let looError = null;
+        let looStdError = null;
+        if (loo) {
+          looError = loo.meanError;
+          looStdError = loo.stdError;
+        }
 
         const quality = summarizeValidationQuality(errors);
         const score = {
-          // meanError reste l'erreur brute (rétro-compatible avec le seuil existant)
           meanError:    meanErr,
           stdError:     stdErr,
-          // Erreur réaliste après correction spatiale, estimée par LOO.
-          looError:     loo ? loo.meanError : null,
-          looStdError:  loo ? loo.stdError  : null,
+          looError,
+          looStdError,
           quadrantErrors: computeQuadrantErrors(rawPredsByPoint, grid),
           perPoint:     errors,
           rawGazeByPoint,
@@ -2000,11 +2068,18 @@
 
           let pts = rawSamples.slice();
           pts = removeOutliers(pts, CONFIG.OUTLIER_SIGMA);
-          pts = medianFilterPoints(pts.length ? pts : rawSamples);
+          let medianInput = rawSamples;
+          if (pts.length) medianInput = pts;
+          pts = medianFilterPoints(medianInput);
 
-          const avgX = noData ? x : mean(pts.map(p => p.x));
-          const avgY = noData ? y : mean(pts.map(p => p.y));
-          const err  = noData ? Math.max(window.innerWidth, window.innerHeight) : distance(avgX, avgY, x, y);
+          let avgX = x;
+          let avgY = y;
+          let err = Math.max(window.innerWidth, window.innerHeight);
+          if (!noData) {
+            avgX = mean(pts.map(p => p.x));
+            avgY = mean(pts.map(p => p.y));
+            err = distance(avgX, avgY, x, y);
+          }
 
           errors.push({
             err, x: avgX, y: avgY, targetX: x, targetY: y, xPct, yPct,
@@ -2023,7 +2098,9 @@
           if (!noData) {
             rawPredsByPoint.push({ predX: avgX, predY: avgY, targetX: x, targetY: y, xPct, yPct });
           }
-          debugLog(noData ? 'error' : 'info', 'Validation point collected', {
+          let collectLevel = 'info';
+          if (noData) collectLevel = 'error';
+          debugLog(collectLevel, 'Validation point collected', {
             index: idx + 1,
             xPct,
             yPct,
@@ -2144,7 +2221,9 @@
     });
     const result = {};
     Object.keys(quads).forEach(q => {
-      result[q] = quads[q].length ? mean(quads[q]) : null;
+      let quadrantError = null;
+      if (quads[q].length) quadrantError = mean(quads[q]);
+      result[q] = quadrantError;
     });
     return result;
   }
@@ -2184,9 +2263,14 @@
     return JSON.parse(JSON.stringify(CONFIG.CAMERA_CONSTRAINTS));
   }
 
+  function getWebGazerRegression() {
+    if (webgazer.getRegression) return webgazer.getRegression();
+    return null;
+  }
+
   function tuneRegression() {
     try {
-      const regs = webgazer.getRegression ? webgazer.getRegression() : null;
+      const regs = getWebGazerRegression();
       if (regs && regs[0]) {
         regs[0].trailTime      = 0;
         regs[0].ridgeParameter = CONFIG.RIDGE_PARAMETER;
@@ -2221,7 +2305,9 @@
     if (typeof webgazer.setTracker === 'function') {
       const originalSetTracker = webgazer.setTracker.bind(webgazer);
       webgazer.setTracker = function diagnosticSetTracker(name) {
-        debugLog(name === 'TFFacemesh' ? 'info' : 'error', 'webgazer.setTracker called', {
+        let trackerLevel = 'error';
+        if (name === 'TFFacemesh') trackerLevel = 'info';
+        debugLog(trackerLevel, 'webgazer.setTracker called', {
           name,
           expected: 'TFFacemesh',
           stack: new Error().stack,
@@ -2259,7 +2345,7 @@
     try { webgazer.setRegression('ridge'); } catch (_) {}
     // [A] Désactiver le trail mousemove + [B] renforcer la régularisation L2
     try {
-      const regs = webgazer.getRegression ? webgazer.getRegression() : null;
+      const regs = getWebGazerRegression();
       if (regs && regs[0]) {
         regs[0].trailTime      = 0;                     // [A] mousemove trail → 0
         regs[0].ridgeParameter = CONFIG.RIDGE_PARAMETER; // [B] 1e-2 au lieu de 1e-5
@@ -2393,7 +2479,8 @@
       errs.push(distance(corrected.x, corrected.y, heldOut.targetX, heldOut.targetY));
     }
     const filtered = removeOutliers1D(errs, CONFIG.OUTLIER_SIGMA);
-    const used = filtered.length ? filtered : errs;
+    let used = errs;
+    if (filtered.length) used = filtered;
     return { meanError: mean(used), stdError: stdDev(used), n: used.length };
   }
 
@@ -2486,7 +2573,9 @@
         const ok = distance(sample.x, sample.y, targetX, targetY) <= CONFIG.ROI_RADIUS;
         ctx.beginPath();
         ctx.arc(sample.x, sample.y, 3, 0, Math.PI * 2);
-        ctx.fillStyle = ok ? 'rgba(39,174,96,0.65)' : 'rgba(231,76,60,0.65)';
+        let sampleColor = 'rgba(231,76,60,0.65)';
+        if (ok) sampleColor = 'rgba(39,174,96,0.65)';
+        ctx.fillStyle = sampleColor;
         ctx.fill();
       });
     });
@@ -2498,10 +2587,15 @@
     overlay.appendChild(btnBack);
   }
 
+  function redGreen(isBad) {
+    if (isBad) return '#e74c3c';
+    return '#27ae60';
+  }
+
   function showScore(score) {
     removeOverlay();
     createOverlay();
-    startGazeDot();   // relance le dot rouge sur l'écran de score
+    startGazeDot();
 
     const quality = score.quality || summarizeValidationQuality(score.perPoint);
     const needsRecal =
@@ -2510,10 +2604,16 @@
       quality.noDataPoints.length > 0 ||
       quality.lowSampleRate;
     const isLimit = !needsRecal && score.meanError > CONFIG.RECALIBRATION_THRESHOLD * 0.7;
-    const color   = needsRecal ? '#e74c3c' : isLimit ? '#e67e22' : '#27ae60';
-    const verdict = needsRecal ? 'Calibration insuffisante'
-                  : isLimit    ? 'Calibration acceptable ⚠️'
-                  :              'Calibration réussie ✓';
+
+    let color = '#27ae60';
+    let verdict = 'Calibration réussie ✓';
+    if (needsRecal) {
+      color = '#e74c3c';
+      verdict = 'Calibration insuffisante';
+    } else if (isLimit) {
+      color = '#e67e22';
+      verdict = 'Calibration acceptable ⚠️';
+    }
 
     // Identifier les quadrants défaillants
     const weakQuads = [];
@@ -2533,53 +2633,68 @@
     `;
 
     const qNames = { topLeft: 'Haut-gauche', topRight: 'Haut-droite', bottomLeft: 'Bas-gauche', bottomRight: 'Bas-droite' };
-    const qRows = score.quadrantErrors
-      ? Object.entries(score.quadrantErrors).map(([q, err]) => {
-          const c = err === null ? '#888' : err > CONFIG.ADAPTIVE_THRESHOLD ? '#e74c3c' : '#27ae60';
-          return `<tr>
+    let qRows = '';
+    if (score.quadrantErrors) {
+      qRows = Object.entries(score.quadrantErrors).map(([q, err]) => {
+        let c = '#888';
+        let errText = '—';
+        if (err !== null) {
+          c = redGreen(err > CONFIG.ADAPTIVE_THRESHOLD);
+          errText = err.toFixed(1) + ' px';
+        }
+        return `<tr>
             <td style="padding:5px 14px;text-align:left;color:#aaa;">${qNames[q]}</td>
             <td style="padding:5px 14px;text-align:right;font-weight:bold;color:${c};">
-              ${err !== null ? err.toFixed(1) + ' px' : '—'}
+              ${errText}
             </td>
           </tr>`;
-        }).join('')
-      : '';
+      }).join('');
+    }
 
     const drift = getDriftScore();
     const qualityRows = `
         <tr>
           <td style="padding:7px 14px;text-align:left;color:#aaa;">Samples dans ROI (moy/min)</td>
-          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${quality.minRoiPercent < CONFIG.MIN_ROI_PERCENT ? '#e74c3c' : '#27ae60'};">
+          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${redGreen(quality.minRoiPercent < CONFIG.MIN_ROI_PERCENT)};">
             ${quality.meanRoiPercent.toFixed(0)}% / ${quality.minRoiPercent.toFixed(0)}%
           </td>
         </tr>
         <tr>
           <td style="padding:7px 14px;text-align:left;color:#aaa;">Fréquence WebGazer (moy/min)</td>
-          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${quality.lowSampleRate ? '#e74c3c' : '#27ae60'};">
+          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${redGreen(quality.lowSampleRate)};">
             ${quality.meanSamplesPerSec.toFixed(1)} / ${quality.minSamplesPerSec.toFixed(1)} Hz
           </td>
         </tr>
         <tr>
           <td style="padding:7px 14px;text-align:left;color:#aaa;">Points sans données</td>
-          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${quality.noDataPoints.length ? '#e74c3c' : '#27ae60'};">
+          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${redGreen(quality.noDataPoints.length)};">
             ${quality.noDataPoints.length}
           </td>
         </tr>
         <tr>
           <td style="padding:7px 14px;text-align:left;color:#aaa;">Points ROI faibles</td>
-          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${quality.weakPoints.length ? '#e74c3c' : '#27ae60'};">
+          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${redGreen(quality.weakPoints.length)};">
             ${quality.weakPoints.length}
           </td>
         </tr>
     `;
-    const driftRow = drift
-      ? `<tr>
+    let driftRow = '';
+    if (drift) {
+      driftRow = `<tr>
           <td style="padding:5px 14px;text-align:left;color:#aaa;">Dérive estimée</td>
-          <td style="padding:5px 14px;text-align:right;font-weight:bold;color:${drift.meanError > CONFIG.DRIFT_THRESHOLD ? '#e74c3c' : '#27ae60'};">
+          <td style="padding:5px 14px;text-align:right;font-weight:bold;color:${redGreen(drift.meanError > CONFIG.DRIFT_THRESHOLD)};">
             ${drift.meanError.toFixed(1)} px
           </td>
-        </tr>`
-      : '';
+        </tr>`;
+    }
+
+    let looRow = '';
+    if (typeof score.looError === 'number') {
+      looRow = `<tr>
+          <td style="padding:7px 14px;text-align:left;color:#aaa;" title="Erreur de généralisation estimée par validation croisée leave-one-out — plus réaliste que l'erreur sur les points de validation eux-mêmes">Erreur corrigée (LOO) ⓘ</td>
+          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${redGreen(score.looError > CONFIG.RECALIBRATION_THRESHOLD)};">${score.looError.toFixed(1)} px</td>
+        </tr>`;
+    }
 
     container.innerHTML = `
       <h2 style="color:${color};margin-top:0;">Résultats de calibration</h2>
@@ -2592,10 +2707,7 @@
           <td style="padding:7px 14px;text-align:left;color:#aaa;">Écart-type</td>
           <td style="padding:7px 14px;text-align:right;font-weight:bold;">${score.stdError.toFixed(1)} px</td>
         </tr>
-        ${typeof score.looError === 'number' ? `<tr>
-          <td style="padding:7px 14px;text-align:left;color:#aaa;" title="Erreur de généralisation estimée par validation croisée leave-one-out — plus réaliste que l'erreur sur les points de validation eux-mêmes">Erreur corrigée (LOO) ⓘ</td>
-          <td style="padding:7px 14px;text-align:right;font-weight:bold;color:${score.looError > CONFIG.RECALIBRATION_THRESHOLD ? '#e74c3c' : '#27ae60'};">${score.looError.toFixed(1)} px</td>
-        </tr>` : ''}
+        ${looRow}
         ${qualityRows}
         <tr><td colspan="2" style="padding:6px 14px;color:#4ecdc4;font-size:.8rem;text-align:left;">— Précision par quadrant —</td></tr>
         ${qRows}
@@ -2616,8 +2728,14 @@
 
     // Bouton Continuer — toujours visible
     const btnOk = document.createElement('button');
-    btnOk.textContent = needsRecal ? 'Continuer quand même →' : 'Continuer →';
-    btnOk.style.cssText = _btnStyle(needsRecal ? '#7f8c8d' : '#27ae60');
+    let okText = 'Continuer →';
+    let okColor = '#27ae60';
+    if (needsRecal) {
+      okText = 'Continuer quand même →';
+      okColor = '#7f8c8d';
+    }
+    btnOk.textContent = okText;
+    btnOk.style.cssText = _btnStyle(okColor);
     btnOk.addEventListener('click', () => {
       stopGazeDot();
       removeOverlay();
@@ -2660,8 +2778,14 @@
 
     // Bouton recalibration complète
     const btnRecal = document.createElement('button');
-    btnRecal.textContent = needsRecal ? 'Recalibrer complètement' : 'Recalibrer quand même';
-    btnRecal.style.cssText = _btnStyle(needsRecal ? '#e74c3c' : '#7f8c8d');
+    let recalText = 'Recalibrer quand même';
+    let recalColor = '#7f8c8d';
+    if (needsRecal) {
+      recalText = 'Recalibrer complètement';
+      recalColor = '#e74c3c';
+    }
+    btnRecal.textContent = recalText;
+    btnRecal.style.cssText = _btnStyle(recalColor);
     btnRecal.addEventListener('click', () => {
       if (typeof webgazer !== 'undefined') { try { webgazer.clearData(); } catch (_) {} }
       kalman.reset(); biasX = 0; biasY = 0;
@@ -2687,12 +2811,14 @@
   // ─── Stockage localStorage ─────────────────────────────────────────────────
 
   function saveToStorage(score) {
+    let storedLooError = null;
+    if (typeof score.looError === 'number') storedLooError = score.looError;
     try {
       localStorage.setItem(CONFIG.STORAGE_KEY, JSON.stringify({
         timestamp:      new Date().toISOString(),
         meanError:      score.meanError,
         stdError:       score.stdError,
-        looError:       typeof score.looError === 'number' ? score.looError : null,
+        looError:       storedLooError,
         quadrantErrors: score.quadrantErrors || null,
         quality:        score.quality || null,
         threshold:      CONFIG.RECALIBRATION_THRESHOLD,
@@ -2709,7 +2835,7 @@
     // car IndexedDB (saveDataAcrossSessions) n'est pas fiable entre pages
     try {
       if (typeof webgazer !== 'undefined') {
-        const regs = webgazer.getRegression ? webgazer.getRegression() : null;
+        const regs = getWebGazerRegression();
         if (regs && regs[0] && regs[0].getData) {
           const trainingData = regs[0].getData();
           if (trainingData && trainingData.length > 0) {
@@ -2835,7 +2961,8 @@
     getStoredData() {
       try {
         const raw = localStorage.getItem(CONFIG.STORAGE_KEY);
-        return raw ? JSON.parse(raw) : null;
+        if (!raw) return null;
+        return JSON.parse(raw);
       } catch (_) { return null; }
     },
 
@@ -2863,7 +2990,7 @@
         const trainingData = JSON.parse(raw);
         if (!trainingData || !trainingData.length) { debugLog('warn', 'Training data empty'); return false; }
         if (typeof webgazer === 'undefined') return false;
-        const regs = webgazer.getRegression ? webgazer.getRegression() : null;
+        const regs = getWebGazerRegression();
         if (!regs || !regs[0]) return false;
         // Réinjecter chaque point d'entraînement
         if (typeof regs[0].setData === 'function') {
@@ -2892,7 +3019,8 @@
     // tremblement frame-à-frame de WebGazer.
     smoothPrediction(x, y, ts) {
       if (x == null || y == null || !Number.isFinite(x) || !Number.isFinite(y)) return null;
-      const t = Number.isFinite(ts) ? ts : Date.now();
+      let t = Date.now();
+      if (Number.isFinite(ts)) t = ts;
       const oe = runtimeOneEuro.filter(x, y, t);
       return applySpatialCorrection(oe.x, oe.y);
     },
@@ -2930,7 +3058,9 @@
   global.Calibration = Calibration;
   if (typeof webgazer !== 'undefined') {
     installWebGazerDiagnostics();
-    debugLog('info', 'calibration.js loaded', { version: CONFIG.VERSION, href: typeof location !== 'undefined' ? location.href : null });
+    let currentHref = null;
+    if (typeof location !== 'undefined') currentHref = location.href;
+    debugLog('info', 'calibration.js loaded', { version: CONFIG.VERSION, href: currentHref });
   } else {
     debugLog('warn', 'calibration.js loaded before WebGazer', { version: CONFIG.VERSION });
   }

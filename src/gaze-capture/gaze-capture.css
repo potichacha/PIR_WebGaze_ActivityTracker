@@ -1,0 +1,41 @@
+/**
+ * gaze-capture.css
+ *
+ * Styles de l'indicateur de statut webcam affiché en bas à gauche.
+ * Seule la couleur du point et son animation sont modifiées dynamiquement
+ * via JS (style.background et style.animation sur #gc-status-dot).
+ */
+
+#gc-status-indicator {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 99998;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(15, 15, 26, 0.88);
+  border: 1px solid rgba(78, 205, 196, 0.3);
+  border-radius: 20px;
+  padding: 6px 14px;
+  font-family: Arial, sans-serif;
+  font-size: 0.8rem;
+  color: #bbb;
+  pointer-events: none;
+  transition: opacity 0.3s;
+}
+
+#gc-status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #888;
+  flex-shrink: 0;
+  transition: background 0.3s;
+}
+
+@keyframes gc-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
