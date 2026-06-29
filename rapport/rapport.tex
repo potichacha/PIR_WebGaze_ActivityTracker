@@ -245,6 +245,36 @@ vite. WebGazer supposant que la tête ne bouge pas, on ajoute aussi une
 visage, et tout déplacement de la tête décale le curseur d'une quantité proportionnelle
 et limitée, ce qui réduit la dérive sur les longues sessions.
 
+\subsection{Comparaison des conditions de capture}
+À partir des sessions archivées dans \code{data/}, nous comparons l'erreur moyenne de calibration (en pixels) selon quatre conditions de capture. Les valeurs indisponibles sont notées \textit{N.D.}~: dans ces configurations, le visage n'a pas pu être détecté de manière suffisamment fiable pour produire une mesure exploitable.
+\newline
+Voici les différentes conditions de capture:
+\begin{itemize}
+    \item \textbf{Situation par défaut} : webcam placée au-dessus de l'écran, luminosité moyenne, sans lunettes.
+    \item \textbf{Lumière claire} : une meilleure visibilité des traits du visage améliore la détection des repères et réduit l'erreur de calibration.
+    \item \textbf{Lunettes} : les reflets sur les verres peuvent perturber la détection des yeux et augmenter l'erreur.
+    \item \textbf{Caméra sous l'écran} : cette configuration se rapproche de celle des eye-trackers classiques, généralement positionnés sous l'écran.
+\end{itemize}
+
+
+\begin{table}[h]
+\centering
+\small
+\renewcommand{\arraystretch}{1.2}
+\begin{tabular}{p{4.1cm} >{\centering\arraybackslash}p{3.4cm} >{\centering\arraybackslash}p{3.8cm} >{\centering\arraybackslash}p{3.0cm}}
+\toprule
+\textbf{Condition} & \shortstack{\textbf{Mediapipe}\\\textbf{(base)}} & \shortstack{\textbf{Mediapipe}\\\textbf{point mouvant}} & \textbf{WebGazer} \\
+\midrule
+Situation par défaut & 165.2 px & 139.4 px & \textit{N.D.} \\
+Lumière claire & 132.2 px & 219.0 px & 7086.5 px \\
+Port de lunettes & 166.8 px & 183.8 px & \textit{N.D.} \\
+Caméra sous l'écran & 113.1 px & 225.6 px & 7359.3 px \\
+\bottomrule
+\end{tabular}
+\caption{Comparaison des conditions de capture à partir des sessions du dossier \code{data/}.}
+\label{tab:conditions-capture}
+\end{table}
+
 % ═════════════════════════════════════════════════════════════════════════════
 \section{Second moteur : MediaPipe FaceLandmarker}
 \label{sec:mediapipe}
